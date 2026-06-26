@@ -1,0 +1,14 @@
+{
+  "model": "opusplan",
+  "permissions": {
+    "defaultMode": "auto",
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./secrets/**)",
+      "Bash(rm -rf *)",
+      "Bash(curl * | bash)",
+      "Bash(git push --force*)"
+    ]
+  }
+}
