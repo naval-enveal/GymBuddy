@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'core/app_info.dart';
 
 void main() {
-  runApp(const GymBuddyApp());
+  // ProviderScope is the root of Riverpod's state graph; every provider read in
+  // the app resolves against it. Wiring it here (M0) lets later milestones add
+  // providers without touching bootstrap.
+  runApp(const ProviderScope(child: GymBuddyApp()));
 }
 
 /// Root application widget.
 ///
 /// Intentionally minimal for M0: it proves the app boots and renders a frame.
-/// The design system, Riverpod scope, routing, and feature screens are layered
-/// on in later milestones (see docs/PLAN.md).
+/// The design system, routing, and feature screens are layered on in later
+/// milestones (see docs/PLAN.md).
 class GymBuddyApp extends StatelessWidget {
   const GymBuddyApp({super.key});
 
@@ -30,12 +36,16 @@ class GymBuddyApp extends StatelessWidget {
 }
 
 /// Placeholder landing screen shown until the app shell ships in M2.
-class BootScreen extends StatelessWidget {
+///
+/// A [ConsumerWidget] so it can read [appInfoProvider] — the first consumer of
+/// Riverpod state in the app.
+class BootScreen extends ConsumerWidget {
   const BootScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final appInfo = ref.watch(appInfoProvider);
     return Scaffold(
       body: Center(
         child: Column(
@@ -47,10 +57,10 @@ class BootScreen extends StatelessWidget {
               color: theme.colorScheme.primary,
             ),
             const SizedBox(height: 16),
-            Text('GymBuddy', style: theme.textTheme.headlineMedium),
+            Text(appInfo.name, style: theme.textTheme.headlineMedium),
             const SizedBox(height: 8),
             Text(
-              'Your AI training buddy',
+              appInfo.tagline,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

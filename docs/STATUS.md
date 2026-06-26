@@ -14,7 +14,7 @@
 ---
 
 ## Next up
-**M0 · Scaffold & tooling** → Riverpod wired into the app.
+**M0 · Scaffold & tooling** → Lint + `flutter analyze` configured, both clean.
 
 ---
 
@@ -24,7 +24,7 @@
 - [x] Monorepo initialized (`app/`, `server/`, `docs/`, `.claude/`)
 - [x] Flutter app boots on a device/simulator
 - [x] Express + Mongoose server boots with a health-check endpoint
-- [ ] Riverpod wired into the app
+- [x] Riverpod wired into the app
 - [ ] Lint + `flutter analyze` configured, both clean
 - [ ] CI runs analyze + server tests on push
 - [ ] `app/` and `server/` CLAUDE.md files created
@@ -102,6 +102,7 @@
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M0 · Riverpod wired into the app: `ProviderScope` at the root in `main.dart`, first provider `appInfoProvider` in `core/app_info.dart`, `BootScreen` reads it as a `ConsumerWidget`; widget tests verify boot + provider override. `flutter analyze` clean, `flutter test` green (2/2).
 - 2026-06-26 · M0 · Express + Mongoose server boots with a `GET /health` endpoint (status/uptime/timestamp/db state); src split into config/db/routes/controllers; jest+supertest tests and eslint config added, `npm run lint` + `npm test` green.
 - 2026-06-26 · M0 · Flutter app scaffolded (`flutter create`, org com.gymbuddy, android+ios); GymBuddyApp boot screen replaces the demo counter; widget smoke test verifies boot; `flutter analyze` + `flutter test` green.
 - 2026-06-26 · M0 · Monorepo initialized: app/, server/, docs/, .claude/ skeleton per PLAN, plus root .gitignore and README.
