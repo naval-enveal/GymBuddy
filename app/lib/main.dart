@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/app_info.dart';
+import 'package:gymbuddy/core/app_info.dart';
 
 void main() {
   // ProviderScope is the root of Riverpod's state graph; every provider read in

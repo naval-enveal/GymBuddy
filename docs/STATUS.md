@@ -14,7 +14,7 @@
 ---
 
 ## Next up
-**M0 · Scaffold & tooling** → Lint + `flutter analyze` configured, both clean.
+**M0 · Scaffold & tooling** → CI runs analyze + server tests on push.
 
 ---
 
@@ -25,7 +25,7 @@
 - [x] Flutter app boots on a device/simulator
 - [x] Express + Mongoose server boots with a health-check endpoint
 - [x] Riverpod wired into the app
-- [ ] Lint + `flutter analyze` configured, both clean
+- [x] Lint + `flutter analyze` configured, both clean
 - [ ] CI runs analyze + server tests on push
 - [ ] `app/` and `server/` CLAUDE.md files created
 
@@ -102,6 +102,7 @@
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M0 · Lint + analyze configured and clean on both ends. Flutter `analysis_options.yaml` hardened beyond the template: strict-casts/inference/raw-types, `missing_required_param`/`dead_code` as errors, build/generated files excluded, plus curated lints (single quotes, trailing commas, const-correctness, package imports, `avoid_print`, `unawaited_futures`). Fixed the surfaced issues (`main.dart` package import, alphabetized pubspec deps). Server keeps its `eslint:recommended` config. `flutter analyze` → no issues, `flutter test` 2/2 green, `npm run lint` clean.
 - 2026-06-26 · M0 · Riverpod wired into the app: `ProviderScope` at the root in `main.dart`, first provider `appInfoProvider` in `core/app_info.dart`, `BootScreen` reads it as a `ConsumerWidget`; widget tests verify boot + provider override. `flutter analyze` clean, `flutter test` green (2/2).
 - 2026-06-26 · M0 · Express + Mongoose server boots with a `GET /health` endpoint (status/uptime/timestamp/db state); src split into config/db/routes/controllers; jest+supertest tests and eslint config added, `npm run lint` + `npm test` green.
 - 2026-06-26 · M0 · Flutter app scaffolded (`flutter create`, org com.gymbuddy, android+ios); GymBuddyApp boot screen replaces the demo counter; widget smoke test verifies boot; `flutter analyze` + `flutter test` green.
