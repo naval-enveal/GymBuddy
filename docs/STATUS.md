@@ -14,13 +14,19 @@
 ---
 
 ## Next up
-**M2 · Flutter foundation + design system + shell** → next task: App shell +
-bottom nav (Home, Plans, Workout, Profile) behind an auth gate. M1 is merged
-into `dev` (PR #1). The design system now lives in `core/design/` and feature
-UI should be built from its barrel (`package:gymbuddy/core/design/design.dart`).
+**M2 · Flutter foundation + design system + shell** → next task: API client with
+secure token storage + refresh interceptor. The shell + auth gate now exist
+(`AuthGate` → `AppShell` four-tab `NavigationBar`, or `SignedOutScreen` when
+signed out); `AuthController` is still an in-memory stub — this next task wires
+it to the M1 `/auth/*` endpoints with secure token persistence + a refresh
+interceptor, after which launch-time session restore can resolve the gate's
+`AuthStatus.unknown` splash. The design system lives in `core/design/` and
+feature UI is built from its barrel (`package:gymbuddy/core/design/design.dart`).
 (Note: the Flutter SDK is present at `/opt/flutter/bin` but not on `PATH` —
-prepend it before running `flutter analyze`/`test`. The earlier "SDK absent"
-note was wrong; analyze + test run green here.)
+prepend it before running `flutter analyze`/`test`. Riverpod is 3.x: legacy
+`StateProvider` lives behind `flutter_riverpod/legacy.dart` — prefer a
+`Notifier`; `NotifierProvider.overrideWith` takes a zero-arg factory and a
+notifier must not touch `state` before its `build()` runs.)
 
 ---
 
@@ -44,7 +50,7 @@ note was wrong; analyze + test run green here.)
 
 ### M2 — Flutter foundation + design system + shell  `[ ]`
 - [x] Design system in `core/design/` (theme, tokens, reusable widgets)
-- [ ] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
+- [x] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
 - [ ] API client with secure token storage + refresh interceptor
 - [ ] Login / signup screens wired to M1 endpoints
 
@@ -108,6 +114,32 @@ note was wrong; analyze + test run green here.)
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M2 · App shell + four-tab bottom nav, behind a single auth gate.
+  `AuthGate` (`features/auth/`) is the one place the app branches on auth: it
+  watches `authControllerProvider` and renders the `AppShell` when
+  authenticated, the `SignedOutScreen` when not, and a splash while session
+  restore is pending (`AuthStatus.unknown`, reserved for the next token-storage
+  task). `AuthController` is a thin in-memory `Notifier<AuthStatus>` stub
+  (`signIn`/`signOut`) so the gate is real and testable now; credential exchange
+  lands next. `AppShell` is a Material 3 `NavigationBar` over an `IndexedStack`
+  (tab bodies kept alive across switches) with the four primary destinations —
+  Home, Plans, Workout, Profile. Selected-tab index lives in Riverpod
+  (`shellTabProvider`, an `autoDispose` `NotifierProvider`) rather than widget
+  state, per the no-logic-in-widgets rule, so it survives rebuilds and is
+  test-inspectable; `autoDispose` resets it to Home on a fresh sign-in. Home /
+  Plans / Workout are on-brand `ComingSoon` placeholders (filled in M3–M6);
+  Profile hosts the `signOut` action so the gate has a way back; the
+  `SignedOutScreen` shows branding from `appInfoProvider` + a "Get started" CTA
+  that calls `signIn`. `main.dart` boots straight into `AuthGate`. Reconciled
+  the shell/auth code (committed earlier as a pre-run checkpoint) with
+  Riverpod 3.x: replaced the legacy `StateProvider` with a `ShellTabController
+  extends Notifier<int>`, switched the test override to a zero-arg factory, and
+  fixed the authenticated-container helper to use an `AuthController` subclass
+  whose `build()` returns authenticated (a notifier can't set `state` before
+  `build()` runs). 5 new tests (`test/features/auth/auth_gate_test.dart` walks
+  signed-out → sign in → shell → sign out; `test/features/shell/app_shell_test.dart`
+  covers the four destinations + tab switching). `flutter analyze` clean,
+  `flutter test` 24/24 green.
 - 2026-06-26 · M2 · Design system landed in `app/lib/core/design/`, the
   foundation all feature UI builds on (imported via the barrel
   `core/design/design.dart`). Tokens centralize the visual language: `AppColors`

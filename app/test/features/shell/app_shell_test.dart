@@ -8,12 +8,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gymbuddy/core/design/design.dart';
 import 'package:gymbuddy/features/auth/auth_controller.dart';
 import 'package:gymbuddy/features/auth/auth_gate.dart';
+import 'package:gymbuddy/features/auth/auth_status.dart';
 import 'package:gymbuddy/features/shell/app_shell.dart';
+
+/// An [AuthController] that boots already authenticated, so the gate renders
+/// the shell without exercising the signed-out landing first.
+class _AuthedController extends AuthController {
+  @override
+  AuthStatus build() => AuthStatus.authenticated;
+}
 
 ProviderContainer _authenticatedContainer() {
   return ProviderContainer(
     overrides: [
-      authControllerProvider.overrideWith((ref) => AuthController()..signIn()),
+      authControllerProvider.overrideWith(_AuthedController.new),
     ],
   );
 }

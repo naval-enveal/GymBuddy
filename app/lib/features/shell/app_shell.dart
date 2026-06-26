@@ -6,13 +6,24 @@ import 'package:gymbuddy/features/plans/plans_screen.dart';
 import 'package:gymbuddy/features/profile/profile_screen.dart';
 import 'package:gymbuddy/features/workout/workout_screen.dart';
 
-/// Index of the selected bottom-nav tab.
+/// Owns the selected bottom-nav tab index.
 ///
 /// Held in Riverpod rather than widget state so the selection survives shell
 /// rebuilds and is inspectable in tests, per the no-logic-in-widgets rule.
-/// `autoDispose` resets it to Home on a fresh sign-in (the shell is torn down
-/// while signed out).
-final shellTabProvider = StateProvider.autoDispose<int>((ref) => 0);
+class ShellTabController extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  /// Selects the tab at [index] (0-based, matching the destination order).
+  void select(int index) => state = index;
+}
+
+/// The selected bottom-nav tab index. `autoDispose` resets it to Home on a
+/// fresh sign-in (the shell is torn down while signed out).
+final shellTabProvider =
+    NotifierProvider.autoDispose<ShellTabController, int>(
+  ShellTabController.new,
+);
 
 /// The authenticated app shell: four primary destinations behind a bottom
 /// navigation bar.
@@ -62,7 +73,7 @@ class AppShell extends ConsumerWidget {
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (i) =>
-            ref.read(shellTabProvider.notifier).state = i,
+            ref.read(shellTabProvider.notifier).select(i),
         destinations: _destinations,
       ),
     );
