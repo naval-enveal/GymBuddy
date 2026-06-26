@@ -11,6 +11,7 @@ const Plan = require('./plan.model');
 const Workout = require('./workout.model');
 const WorkoutLog = require('./workout-log.model');
 const Subscription = require('./subscription.model');
+const RefreshToken = require('./refresh-token.model');
 const constants = require('./constants');
 
 module.exports = {
@@ -20,5 +21,6 @@ module.exports = {
   Workout,
   WorkoutLog,
   Subscription,
+  RefreshToken,
   constants,
 };

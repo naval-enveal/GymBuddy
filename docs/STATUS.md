@@ -14,10 +14,10 @@
 ---
 
 ## Next up
-**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: JWT auth
-(register, login, refresh, logout) with bcrypt. The six Mongoose models are done
-and unit-tested; auth services/controllers build on the `User` and
-`Subscription` models.
+**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: Auth middleware
+that verifies the `Authorization: Bearer <access>` header, loads the user, and
+rejects missing/invalid/expired tokens with the shared error shape. Builds on the
+`verifyAccessToken` helper in `token.service`.
 
 ---
 
@@ -34,7 +34,7 @@ and unit-tested; auth services/controllers build on the `User` and
 
 ### M1 — Backend foundation + auth  [GATE CLEARED]  `[ ]`
 - [x] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
-- [ ] JWT auth: register, login, refresh, logout (bcrypt)
+- [x] JWT auth: register, login, refresh, logout (bcrypt)
 - [ ] Auth middleware
 - [ ] Request validation + shared error response shape
 - [ ] Passing integration tests for the auth flow
@@ -105,6 +105,20 @@ and unit-tested; auth services/controllers build on the `User` and
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M1 · JWT auth flow shipped: `POST /auth/{register,login,refresh,logout}`.
+  `token.service` signs/verifies access (15m) + refresh (30d) JWTs under separate
+  secrets with a `type` claim, so neither can be replayed as the other; refresh
+  tokens carry a unique `jti`. `auth.service` hashes passwords with bcrypt
+  (`BCRYPT_ROUNDS`, default 12), creates the default free `Subscription` on
+  register, and uses a new `RefreshToken` model (stores only the `jti` + TTL index,
+  never the token string) for server-side rotation/revocation — refresh atomically
+  consumes the old `jti` and issues a fresh pair, so replaying a rotated/revoked
+  token 401s; logout is idempotent. Login uses one non-enumerating 401 for both
+  unknown email and bad password. Controllers map `AuthError`/dup-key/validation
+  onto the shared `{ error: { message } }` shape; `passwordHash` is never returned.
+  Env gains JWT/bcrypt settings with dev fallbacks + `assertProdSecrets()` boot
+  guard; `.env.example` updated. 17 new tests (6 token unit + 11 full-flow
+  integration via `mongodb-memory-server`). `npm run lint` clean, `npm test` 40/40 green.
 - 2026-06-26 · M1 · Six Mongoose models added under `server/src/models/`: `User`
   (email + bcrypt `passwordHash`, hash `select:false` and stripped from `toJSON`),
   `Profile` (onboarding goals/experience/days/equipment/injuries/body stats, one
