@@ -32,7 +32,17 @@ const planSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
-    // True for the single plan the owner is currently training against.
+    // For a plan adopted from the library, the template it was copied from.
+    // Lets the app mark which template is currently active. Null for templates
+    // themselves and any ad-hoc plan.
+    sourceTemplate: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Plan',
+      default: null,
+    },
+    // True for the single plan the owner is currently training against. One
+    // active plan per user is enforced in the service, never trusted from the
+    // client.
     isActive: { type: Boolean, default: false },
   },
   { timestamps: true }

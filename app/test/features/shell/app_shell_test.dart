@@ -26,6 +26,13 @@ class _AuthedController extends AuthController {
 class _StubPlanApi implements PlanApi {
   @override
   Future<List<PlanTemplate>> fetchTemplates() async => const [];
+
+  @override
+  Future<PlanTemplate?> fetchActivePlan() async => null;
+
+  @override
+  Future<PlanTemplate> adoptPlan(String templateId) =>
+      throw UnimplementedError();
 }
 
 /// An onboarding gate that reports onboarding already complete, so the auth gate

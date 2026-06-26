@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/design/design.dart';
+import 'package:gymbuddy/features/plans/active_plan_controller.dart';
 import 'package:gymbuddy/features/plans/plan_models.dart';
 
 /// Detail view for a single template [plan]: its training days and the
@@ -8,15 +10,17 @@ import 'package:gymbuddy/features/plans/plan_models.dart';
 /// rep-tracked-only (the glasses are first-person POV, so form correction ships
 /// only for mirror/POV-visible movements).
 ///
-/// Purely presentational — it renders a [PlanTemplate] already loaded by the
-/// Plans list, so it needs no provider of its own.
-class PlanDetailScreen extends StatelessWidget {
+/// The plan content is loaded by the Plans list, but the screen watches
+/// [activePlanControllerProvider] to drive the "Use this plan" action and to
+/// surface whether this plan is already the user's active one. All I/O stays in
+/// the controller (no logic in widgets).
+class PlanDetailScreen extends ConsumerWidget {
   const PlanDetailScreen({required this.plan, super.key});
 
   final PlanTemplate plan;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(plan.name)),
@@ -37,6 +41,84 @@ class PlanDetailScreen extends StatelessWidget {
             ],
           ],
         ),
+      ),
+      bottomNavigationBar: _AdoptBar(plan: plan),
+    );
+  }
+}
+
+/// Bottom action bar: adopts this plan as the active one, or shows that it
+/// already is. The active plan is an owned copy of a template, so it's matched
+/// back to the template currently shown via [PlanTemplate.sourceTemplate].
+class _AdoptBar extends ConsumerWidget {
+  const _AdoptBar({required this.plan});
+
+  final PlanTemplate plan;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(activePlanControllerProvider);
+    final isActive = active.value?.sourceTemplate == plan.id;
+
+    return SafeArea(
+      minimum: const EdgeInsets.all(AppSpacing.lg),
+      child: isActive
+          ? const _ActivePlanIndicator()
+          : PrimaryButton(
+              key: const Key('plan-adopt'),
+              label: 'Use this plan',
+              icon: Icons.check_circle_outline,
+              isLoading: active.isLoading,
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                await ref
+                    .read(activePlanControllerProvider.notifier)
+                    .adopt(plan.id);
+                if (ref.read(activePlanControllerProvider).hasError) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      key: Key('plan-adopt-error'),
+                      content: Text(
+                        "Couldn't set this as your active plan. Try again.",
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+    );
+  }
+}
+
+/// Shown in place of the adopt button once this plan is the active one.
+class _ActivePlanIndicator extends StatelessWidget {
+  const _ActivePlanIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const Key('plan-active'),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.md,
+      ),
+      decoration: const BoxDecoration(
+        color: AppColors.accentDim,
+        borderRadius: AppRadii.cardRadius,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle, color: AppColors.accent),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            'Your active plan',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
       ),
     );
   }

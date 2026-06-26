@@ -94,6 +94,7 @@ class PlanTemplate {
     this.goal,
     this.experience,
     this.daysPerWeek,
+    this.sourceTemplate,
   });
 
   factory PlanTemplate.fromJson(Map<String, dynamic> json) {
@@ -107,6 +108,7 @@ class PlanTemplate {
       experience: json['experience'] as String?,
       daysPerWeek: (json['daysPerWeek'] as num?)?.toInt(),
       matchScore: (json['matchScore'] as num?)?.toInt() ?? 0,
+      sourceTemplate: json['sourceTemplate'] as String?,
       equipment: rawEquipment is List
           ? <String>[
               for (final e in rawEquipment)
@@ -134,6 +136,12 @@ class PlanTemplate {
   final int matchScore;
   final List<String> equipment;
   final List<PlanWorkout> workouts;
+
+  /// For a plan adopted from the library, the id of the template it was copied
+  /// from; null on the templates themselves. Lets the UI tell which template is
+  /// currently the user's active plan (the active plan is an owned copy with a
+  /// different [id], so it's matched back to its template by this field).
+  final String? sourceTemplate;
 
   String? get goalLabel => _humanizeWire(goal);
   String? get experienceLabel => _humanizeWire(experience);

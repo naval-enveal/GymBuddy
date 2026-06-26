@@ -1,6 +1,7 @@
 'use strict';
 
-const { Plan, Profile, constants } = require('../models');
+const { Plan, Profile, Workout, constants } = require('../models');
+const { ApiError } = require('../middleware/error.middleware');
 
 const { EXPERIENCE_LEVELS } = constants;
 
@@ -114,4 +115,98 @@ async function getMatchedTemplates(userId) {
   return scored.map(({ plan, score }) => ({ ...plan.toJSON(), matchScore: score }));
 }
 
-module.exports = { getMatchedTemplates, scoreTemplate, expandEquipment };
+/**
+ * Copy a template's exercises into a plain object array suitable for a new
+ * owned Workout. Embedded `_id`s and timestamps are dropped so the copy gets
+ * its own; only the prescription fields carry over.
+ *
+ * @param {Array<object>} exercises
+ * @returns {Array<object>}
+ */
+function copyExercises(exercises) {
+  return (exercises || []).map((e) => ({
+    name: e.name,
+    sets: e.sets,
+    reps: e.reps,
+    restSeconds: e.restSeconds,
+    targetWeightKg: e.targetWeightKg,
+    formTracked: e.formTracked,
+    notes: e.notes,
+  }));
+}
+
+/**
+ * Adopt a library template as the caller's active plan.
+ *
+ * Writes an owned, non-template Plan (a deep copy of the template's attributes
+ * and its training-day Workouts, so the user's plan is self-contained and a
+ * library re-seed can't dangle its references) with `isActive: true`. Enforces
+ * **one active plan per user**: any previously active owned plan is deactivated
+ * in the same operation — this is never trusted from the client.
+ *
+ * @param {string} userId
+ * @param {string} templateId  the template Plan to adopt
+ * @returns {Promise<object>} the new active plan, workouts populated
+ */
+async function adoptTemplate(userId, templateId) {
+  const template = await Plan.findOne({
+    _id: templateId,
+    isTemplate: true,
+  }).populate('workouts');
+  if (!template) {
+    throw new ApiError(404, 'Template plan not found');
+  }
+
+  // Copy the template's training days into owned Workouts.
+  const ownedWorkouts = await Workout.create(
+    template.workouts.map((w) => ({
+      name: w.name,
+      description: w.description,
+      exercises: copyExercises(w.exercises),
+      estimatedMinutes: w.estimatedMinutes,
+      owner: userId,
+    }))
+  );
+
+  // Enforce one active plan per user: deactivate any prior active plan before
+  // activating the new one.
+  await Plan.updateMany(
+    { owner: userId, isActive: true },
+    { $set: { isActive: false } }
+  );
+
+  const plan = await Plan.create({
+    name: template.name,
+    description: template.description,
+    goal: template.goal,
+    experience: template.experience,
+    daysPerWeek: template.daysPerWeek,
+    equipment: template.equipment,
+    workouts: ownedWorkouts.map((w) => w._id),
+    isTemplate: false,
+    owner: userId,
+    sourceTemplate: template._id,
+    isActive: true,
+  });
+
+  return plan.populate('workouts');
+}
+
+/**
+ * Return the caller's currently active plan (workouts populated), or `null` if
+ * they haven't adopted one yet.
+ *
+ * @param {string} userId
+ * @returns {Promise<object|null>}
+ */
+async function getActivePlan(userId) {
+  return Plan.findOne({ owner: userId, isActive: true }).populate('workouts');
+}
+
+module.exports = {
+  getMatchedTemplates,
+  scoreTemplate,
+  expandEquipment,
+  adoptTemplate,
+  getActivePlan,
+};

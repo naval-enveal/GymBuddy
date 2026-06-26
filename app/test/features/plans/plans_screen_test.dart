@@ -58,6 +58,13 @@ class _FakePlanApi implements PlanApi {
     if (future != null) return future!;
     return Future<List<PlanTemplate>>.value(templates);
   }
+
+  @override
+  Future<PlanTemplate?> fetchActivePlan() async => null;
+
+  @override
+  Future<PlanTemplate> adoptPlan(String templateId) =>
+      throw UnimplementedError();
 }
 
 /// A [PlanApi] that fails the first call and succeeds afterward, to drive the
@@ -74,6 +81,13 @@ class _FlakyPlanApi implements PlanApi {
     if (calls == 1) throw const ApiException(500, 'boom');
     return templates;
   }
+
+  @override
+  Future<PlanTemplate?> fetchActivePlan() async => null;
+
+  @override
+  Future<PlanTemplate> adoptPlan(String templateId) =>
+      throw UnimplementedError();
 }
 
 Future<ProviderContainer> _mount(

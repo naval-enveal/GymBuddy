@@ -26,6 +26,30 @@ class PlanApi {
         if (t is Map<String, dynamic>) PlanTemplate.fromJson(t),
     ];
   }
+
+  /// Fetches the user's currently active plan, or `null` if none is adopted.
+  /// Wire shape is `{ plan: {...} | null }`. Throws [ApiException] on a non-2xx
+  /// response.
+  Future<PlanTemplate?> fetchActivePlan() async {
+    final response = await _client.get('/plans/active');
+    final plan = response is Map ? response['plan'] : null;
+    if (plan is! Map<String, dynamic>) return null;
+    return PlanTemplate.fromJson(plan);
+  }
+
+  /// Adopts the template [templateId] as the user's active plan. The server
+  /// writes an owned, active copy and deactivates any prior active plan (one
+  /// active plan per user, enforced server-side). Returns the resolved owned
+  /// plan. Wire shape is `{ plan: {...} }`. Throws [ApiException] on a non-2xx
+  /// response.
+  Future<PlanTemplate> adoptPlan(String templateId) async {
+    final response = await _client.post('/plans/$templateId/adopt');
+    final plan = response is Map ? response['plan'] : null;
+    if (plan is! Map<String, dynamic>) {
+      throw const ApiException(500, 'Adopting the plan returned no plan');
+    }
+    return PlanTemplate.fromJson(plan);
+  }
 }
 
 /// App-wide [PlanApi] over the shared [apiClientProvider]. Overridden in tests

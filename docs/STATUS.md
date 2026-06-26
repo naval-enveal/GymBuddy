@@ -14,18 +14,30 @@
 ---
 
 ## Next up
-**M4 · Workout plans** is active on branch `m4-plans` (cut from `dev` after M3
-merged via PR #3). The Plans list + detail UI just landed; the last M4 task is
-**"Select / persist active plan"** — let the user adopt a template as their
-active plan. Server side: a new endpoint that writes an *owned, non-template*
-Plan (copy the chosen template's attributes + its Workouts, or reference them)
-with `isActive: true`, enforcing **one active plan per user** server-side
-(deactivate any prior active plan in the same operation — never trust the client
-for this). Client side: a "Use this plan" action on `PlanDetailScreen`
-(`features/plans/plan_detail_screen.dart`) wired through `PlanApi`
-(`features/plans/plan_api.dart`) and the existing `plansControllerProvider`
-pattern; surface which plan is active. When that ships, M4 is complete — open a
-PR into `dev` titled "Milestone M4: Workout plans" and stop.
+**M4 · Workout plans is complete** — all four tasks are checked on branch
+`m4-plans`. The final task (Select / persist active plan) just shipped: the
+backend gained `POST /plans/:id/adopt` (writes an owned, active copy of a
+template and its workouts, deactivating any prior active plan — one active plan
+per user, enforced server-side) and `GET /plans/active`, and the Plans detail
+screen gained a "Use this plan" action surfacing which plan is active. **Open a
+PR from `m4-plans` into `dev` titled "Milestone M4: Workout plans" and stop** —
+a human reviews and merges. The next run cuts `m5-vitals` from `dev` and starts
+**M5 · Vitals dashboard** (first task: integrate the `health` package for
+HealthKit + Health Connect).
+
+Adoption design notes for whoever picks up M5/customization: the adopted plan is
+a *deep copy* (its own owned Workouts), not a reference to the template's
+`owner:null` workouts — so a library re-seed (which `deleteMany`s template
+workouts) can't dangle a user's active plan. Each adopted Plan carries a new
+`sourceTemplate` ref (the template it came from); the app matches the active
+owned plan back to its library card via that field (the owned copy has a
+different `_id`). Server: `adoptTemplate`/`getActivePlan` in
+`services/plan.service.js`, `adoptPlan`/`getActivePlan` controllers, routes in
+`plan.routes.js` (`/active` before `/:id/adopt`). Client: `PlanApi.adoptPlan` +
+`fetchActivePlan`, new `activePlanControllerProvider`
+(`features/plans/active_plan_controller.dart`, `AsyncNotifier<PlanTemplate?>` —
+`build()` loads the active plan, `adopt()` swaps in the owned copy), and the now
+`ConsumerWidget` `PlanDetailScreen` with an `_AdoptBar` bottom action.
 
 The Plans UI (this task, done): `features/plans/` — `plan_models.dart`
 (`PlanTemplate`/`PlanWorkout`/`PlanExercise`, defensive `fromJson` over the
@@ -144,11 +156,11 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Answers persisted via Profile API
 - [x] Routes to Home on completion
 
-### M4 — Workout plans (general / free)  `[ ]`
+### M4 — Workout plans (general / free)  `[x]`
 - [x] Template library seeded in backend
 - [x] Endpoint returns templates matched to profile
 - [x] Plans list + detail UI
-- [ ] Select / persist active plan
+- [x] Select / persist active plan
 
 ### M5 — Vitals dashboard  `[ ]`
 - [ ] `health` package integrated (HealthKit + Health Connect)
@@ -198,6 +210,41 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M4 · Select / persist active plan — completes M4. Backend: two
+  new endpoints on the `/plans` router, both behind `requireAuth` and reusing
+  the shared `{ error: { message } }` shape. `POST /plans/:id/adopt`
+  (`adoptTemplate` in `services/plan.service.js`) adopts a library template as
+  the caller's active plan — it deep-copies the template's training-day Workouts
+  into new `owner`-set Workouts (so a library re-seed, which `deleteMany`s
+  `owner:null` template workouts, can't dangle a user's plan) and writes an
+  owned, non-template Plan with `isActive: true` and a new `sourceTemplate` ref
+  back to the template. It enforces **one active plan per user** server-side:
+  any prior active owned plan is flipped `isActive:false` in the same operation
+  (never trusted from the client). A non-template / unknown id 404s.
+  `GET /plans/active` (`getActivePlan`) returns the caller's active plan
+  (workouts populated) or `null`. New `sourceTemplate` field on the Plan model
+  (ref `Plan`, default null). Client: `PlanApi` gains `adoptPlan(templateId)` +
+  `fetchActivePlan()`; new `activePlanControllerProvider`
+  (`features/plans/active_plan_controller.dart`,
+  `ActivePlanController extends AsyncNotifier<PlanTemplate?>` — `build()` loads
+  the active plan, `adopt()` moves through loading and swaps the resolved owned
+  copy into state, capturing failure as `AsyncError`). `PlanTemplate` gains a
+  `sourceTemplate` field so the UI can match the owned active plan (different
+  `_id`) back to its library card. `PlanDetailScreen` is now a `ConsumerWidget`
+  with an `_AdoptBar` bottom action: a "Use this plan" `PrimaryButton`
+  (spinner while in flight, error → SnackBar) that becomes a "Your active plan"
+  indicator once this plan is active (matched via `sourceTemplate == plan.id`).
+  All I/O stays in the controller/API per no-logic-in-widgets. 9 new server
+  tests (`tests/plans.adopt.test.js`: auth on both endpoints, null-when-none,
+  owned/active/own-workouts copy, active read-back, second-adopt deactivates the
+  first (exactly one active), per-user isolation, non-template/unknown 404,
+  adopted plans never leak into the library) and 8 new client tests (4
+  `active_plan_controller_test.dart`: build loads / null, adopt swaps state,
+  failed adopt → error; 4 `plan_detail_screen_test.dart`: offers + adopts,
+  already-active surfaced, a different active plan isn't marked, adopt failure
+  shows the error and stays adoptable). The shell + plans-screen test fakes now
+  implement the two new `PlanApi` methods. `npm run lint` clean, `npm test`
+  99/99; `flutter analyze` clean, `flutter test` 96/96 green.
 - 2026-06-26 · M4 · Plans list + detail UI — the Plans tab now renders the
   profile-ranked template library instead of a `ComingSoon` placeholder. New
   `features/plans/`: `plan_models.dart` decodes the `GET /plans/templates` wire
