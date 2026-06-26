@@ -6,12 +6,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:gymbuddy/core/storage/token_store.dart';
 import 'package:gymbuddy/main.dart';
+
+/// Boots the app with an empty (in-memory) token store, so launch-time session
+/// restore resolves to the signed-out flow without touching platform storage.
+Future<void> _pumpApp(WidgetTester tester) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+      ],
+      child: const GymBuddyApp(),
+    ),
+  );
+  // Let the restore splash resolve before driving the gate.
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('starts signed out: shows the landing, not the shell',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const ProviderScope(child: GymBuddyApp()));
+    await _pumpApp(tester);
 
     expect(find.text('Get started'), findsOneWidget);
     expect(find.byType(NavigationBar), findsNothing);
@@ -19,7 +35,7 @@ void main() {
 
   testWidgets('signing in reveals the shell with all four tabs',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const ProviderScope(child: GymBuddyApp()));
+    await _pumpApp(tester);
 
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();
@@ -36,7 +52,7 @@ void main() {
 
   testWidgets('signing out from Profile returns to the landing',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const ProviderScope(child: GymBuddyApp()));
+    await _pumpApp(tester);
 
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();

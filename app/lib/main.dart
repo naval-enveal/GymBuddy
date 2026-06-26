@@ -2,13 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/design/design.dart';
+import 'package:gymbuddy/core/network/api_client.dart';
+import 'package:gymbuddy/features/auth/auth_controller.dart';
 import 'package:gymbuddy/features/auth/auth_gate.dart';
 
 void main() {
   // ProviderScope is the root of Riverpod's state graph; every provider read in
   // the app resolves against it. Wiring it here (M0) lets later milestones add
   // providers without touching bootstrap.
-  runApp(const ProviderScope(child: GymBuddyApp()));
+  //
+  // The session-expiry hook is overridden here (composition root) so `core/`
+  // network code can sign the user out without an upward dependency on the auth
+  // feature: a dead refresh token drives the gate back to the signed-out flow.
+  runApp(
+    ProviderScope(
+      overrides: [
+        sessionExpiredProvider.overrideWith(
+          (ref) =>
+              () => ref.read(authControllerProvider.notifier).signOut(),
+        ),
+      ],
+      child: const GymBuddyApp(),
+    ),
+  );
 }
 
 /// Root application widget.

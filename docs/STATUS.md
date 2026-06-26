@@ -14,19 +14,29 @@
 ---
 
 ## Next up
-**M2 · Flutter foundation + design system + shell** → next task: API client with
-secure token storage + refresh interceptor. The shell + auth gate now exist
-(`AuthGate` → `AppShell` four-tab `NavigationBar`, or `SignedOutScreen` when
-signed out); `AuthController` is still an in-memory stub — this next task wires
-it to the M1 `/auth/*` endpoints with secure token persistence + a refresh
-interceptor, after which launch-time session restore can resolve the gate's
-`AuthStatus.unknown` splash. The design system lives in `core/design/` and
+**M2 · Flutter foundation + design system + shell** → next task: login / signup
+screens wired to the M1 endpoints. The networking layer now exists:
+`core/storage/token_store.dart` (`SecureTokenStore` over `flutter_secure_storage`
++ an `InMemoryTokenStore` for tests, behind `tokenStoreProvider`),
+`core/network/api_client.dart` (`ApiClient` with Bearer-header injection + a
+single-flight refresh-on-401 interceptor, `apiClientProvider`), and
+`features/auth/auth_api.dart` (`AuthApi.login/register/logout` →
+`AuthSession`). `AuthController` is wired: `build()` restores the session from
+the token store at launch (resolving the gate's `AuthStatus.unknown` splash),
+`signIn`/`register` exchange credentials via `AuthApi` and persist the issued
+pair, and `signOut` clears tokens + best-effort revokes server-side. The
+signed-out landing's "Get started" still calls the transitional
+`AuthController.signInForPreview` (no credentials, no persistence) — the next
+task replaces it with real login/signup forms calling `signIn`/`register`,
+surfacing `ApiException.message`. The design system lives in `core/design/` and
 feature UI is built from its barrel (`package:gymbuddy/core/design/design.dart`).
 (Note: the Flutter SDK is present at `/opt/flutter/bin` but not on `PATH` —
 prepend it before running `flutter analyze`/`test`. Riverpod is 3.x: legacy
 `StateProvider` lives behind `flutter_riverpod/legacy.dart` — prefer a
 `Notifier`; `NotifierProvider.overrideWith` takes a zero-arg factory and a
-notifier must not touch `state` before its `build()` runs.)
+notifier must not touch `state` before its `build()` runs. Dev API base URL
+defaults to `http://10.0.2.2:4000` — the Android-emulator alias for the host's
+dev server on port 4000; override `apiBaseUrlProvider` per environment.)
 
 ---
 
@@ -51,7 +61,7 @@ notifier must not touch `state` before its `build()` runs.)
 ### M2 — Flutter foundation + design system + shell  `[ ]`
 - [x] Design system in `core/design/` (theme, tokens, reusable widgets)
 - [x] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
-- [ ] API client with secure token storage + refresh interceptor
+- [x] API client with secure token storage + refresh interceptor
 - [ ] Login / signup screens wired to M1 endpoints
 
 ### M3 — Onboarding  `[ ]`
@@ -114,6 +124,39 @@ notifier must not touch `state` before its `build()` runs.)
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M2 · API client + secure token storage + refresh interceptor, and
+  `AuthController` wired to the M1 `/auth/*` endpoints. New `core/storage/token_store.dart`:
+  `AuthTokens` (value type) behind a `TokenStore` interface with `SecureTokenStore`
+  (OS keychain/keystore via `flutter_secure_storage`; reads/clears swallow
+  platform/read failures so a host with no secure storage degrades to a
+  signed-out session rather than crashing) and `InMemoryTokenStore` (tests),
+  exposed via `tokenStoreProvider`. New `core/network/api_client.dart`: `ApiClient`
+  is a thin JSON-over-HTTP client (on `package:http`) that injects
+  `Authorization: Bearer <access>` on authenticated calls and runs the refresh
+  interceptor — on a `401` it exchanges the refresh token at `/auth/refresh`,
+  persists the rotated pair, and replays the original request exactly once;
+  concurrent 401s share one in-flight refresh (so the refresh token rotates at
+  most once); a failed refresh clears tokens, fires `onSessionExpired`, and
+  surfaces the original 401 as an `ApiException` (whose message is lifted from
+  the backend's shared `{ error: { message } }` shape). `core/` stays free of any
+  upward dependency on the auth feature: the expiry hook is a no-op
+  `sessionExpiredProvider` that `main.dart` (the composition root) overrides to
+  call `AuthController.signOut`. New `features/auth/auth_api.dart` (`AuthApi`)
+  types the `/auth/{register,login,logout}` calls into `AuthSession`
+  (`AuthUser` + `AuthTokens`). `AuthController` now: `build()` returns
+  `AuthStatus.unknown` and restores the session from the token store at launch
+  (tokens present → authenticated, optimistic — an expired access token is
+  repaired by the interceptor on the first protected call, a dead refresh token
+  routes back through `signOut`; else → unauthenticated), `signIn`/`register`
+  exchange credentials via `AuthApi` and persist the issued pair, `signOut`
+  clears tokens then best-effort revokes server-side. The transitional
+  signed-out landing keeps a credential-free `signInForPreview` until the login
+  screens land next. 19 new tests (token store 4, ApiClient 7 incl. refresh /
+  single-flight / failed-refresh, AuthApi 3, AuthController 5 incl.
+  restore/persist/clear); existing gate + boot widget tests updated to seed an
+  empty `InMemoryTokenStore` and settle past the new restore splash. Added deps
+  `http` + `flutter_secure_storage`. `flutter analyze` clean, `flutter test`
+  43/43 green.
 - 2026-06-26 · M2 · App shell + four-tab bottom nav, behind a single auth gate.
   `AuthGate` (`features/auth/`) is the one place the app branches on auth: it
   watches `authControllerProvider` and renders the `AppShell` when

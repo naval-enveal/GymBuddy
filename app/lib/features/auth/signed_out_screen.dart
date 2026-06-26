@@ -10,9 +10,10 @@ import 'package:gymbuddy/features/auth/auth_controller.dart';
 ///
 /// This is the transitional signed-out landing. The dedicated login / signup
 /// screens wired to the M1 endpoints land in the next M2 task and will replace
-/// the [PrimaryButton] action here; for now it calls [AuthController.signIn] so
-/// the auth gate can be exercised end-to-end. Branding (name + tagline) is read
-/// from [appInfoProvider] rather than hardcoded.
+/// the [PrimaryButton] action here; for now it calls
+/// [AuthController.signInForPreview] so the auth gate can be exercised
+/// end-to-end. Branding (name + tagline) is read from [appInfoProvider] rather
+/// than hardcoded.
 class SignedOutScreen extends ConsumerWidget {
   const SignedOutScreen({super.key});
 
@@ -45,7 +46,9 @@ class SignedOutScreen extends ConsumerWidget {
               const Spacer(),
               PrimaryButton(
                 label: 'Get started',
-                onPressed: () => ref.read(authControllerProvider.notifier).signIn(),
+                onPressed: () => ref
+                    .read(authControllerProvider.notifier)
+                    .signInForPreview(),
               ),
             ],
           ),
