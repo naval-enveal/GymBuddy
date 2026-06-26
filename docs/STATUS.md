@@ -14,10 +14,11 @@
 ---
 
 ## Next up
-**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: Passing
-integration tests for the auth flow — end-to-end coverage of
-register/login/refresh/logout against an in-memory MongoDB, exercising the
-happy paths plus rotation/revocation and the shared error shape.
+**M2 · Flutter foundation + design system + shell** → next task: Design system
+in `core/design/` (theme, tokens, reusable widgets). M1 is fully complete; a PR
+into `dev` is open and awaits human review/merge before M2 begins. (Note: the
+Flutter SDK is absent in this build env — prior M0 entries confirm Dart tasks
+can't be analyzed/tested here, so M2 may require a human-run analyze.)
 
 ---
 
@@ -32,12 +33,12 @@ happy paths plus rotation/revocation and the shared error shape.
 - [x] CI runs analyze + server tests on push
 - [x] `app/` and `server/` CLAUDE.md files created
 
-### M1 — Backend foundation + auth  [GATE CLEARED]  `[ ]`
+### M1 — Backend foundation + auth  [GATE CLEARED]  `[x]`
 - [x] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
 - [x] JWT auth: register, login, refresh, logout (bcrypt)
 - [x] Auth middleware
 - [x] Request validation + shared error response shape
-- [ ] Passing integration tests for the auth flow
+- [x] Passing integration tests for the auth flow
 
 ### M2 — Flutter foundation + design system + shell  `[ ]`
 - [ ] Design system in `core/design/` (theme, tokens, reusable widgets)
@@ -105,6 +106,19 @@ happy paths plus rotation/revocation and the shared error shape.
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M1 · End-to-end auth-flow integration tests
+  (`tests/auth.flow.test.js`), completing M1. Where `auth.test.js` exercises
+  each endpoint in isolation and `auth.middleware.test.js` mounts `requireAuth`
+  against synthetic tokens, this walks one user through the *connected*
+  lifecycle against an in-memory MongoDB: register → use the issued access
+  token on a real protected `/me` route → refresh (rotation) → use the rotated
+  access token → logout → confirm the refresh token is revoked and reuse 401s.
+  Proves tokens minted by the real `/auth/*` endpoints authenticate through the
+  real middleware stack, that a refresh token is rejected as a Bearer access
+  token (type mismatch), and that a missing token yields the shared
+  `{ error: { message } }` 401. It also pins the designed contract that an
+  access token stays valid until expiry after logout (logout revokes only the
+  refresh side). 5 new tests; `npm run lint` clean, `npm test` 65/65 green.
 - 2026-06-26 · M1 · Request validation + a centralized shared error shape. New
   generic `validate(schema)` middleware (`src/middleware/validate.middleware.js`)
   checks/sanitizes `req.body` at the edge and, on the first violation, forwards a
