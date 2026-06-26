@@ -15,17 +15,31 @@
 
 ## Next up
 **M4 · Workout plans** is active on branch `m4-plans` (cut from `dev` after M3
-merged via PR #3). The matching endpoint just landed; the next unchecked task is
-**"Plans list + detail UI"** — Flutter screens (the Plans tab in `AppShell` is
-still a `ComingSoon` placeholder) that fetch `GET /plans/templates` and render
-the ranked library as a list, each tappable through to a detail view showing the
-plan's training days and their exercises (use the `formTracked` flag to mark
-form-tracked vs rep-tracked-only exercises). Keep logic out of widgets per the
-Riverpod / no-logic-in-widgets rule: add a `PlanApi` + a provider/notifier that
-calls the endpoint through `apiClientProvider`, mirroring
-`features/onboarding/profile_api.dart`. After that comes
-select/persist-active-plan (writes an owned, non-template Plan with `isActive`,
-enforced one-active-per-user server-side).
+merged via PR #3). The Plans list + detail UI just landed; the last M4 task is
+**"Select / persist active plan"** — let the user adopt a template as their
+active plan. Server side: a new endpoint that writes an *owned, non-template*
+Plan (copy the chosen template's attributes + its Workouts, or reference them)
+with `isActive: true`, enforcing **one active plan per user** server-side
+(deactivate any prior active plan in the same operation — never trust the client
+for this). Client side: a "Use this plan" action on `PlanDetailScreen`
+(`features/plans/plan_detail_screen.dart`) wired through `PlanApi`
+(`features/plans/plan_api.dart`) and the existing `plansControllerProvider`
+pattern; surface which plan is active. When that ships, M4 is complete — open a
+PR into `dev` titled "Milestone M4: Workout plans" and stop.
+
+The Plans UI (this task, done): `features/plans/` — `plan_models.dart`
+(`PlanTemplate`/`PlanWorkout`/`PlanExercise`, defensive `fromJson` over the
+`GET /plans/templates` wire shape, wire-enum humanizing label getters),
+`plan_api.dart` (`PlanApi.fetchTemplates()` + `planApiProvider` over
+`apiClientProvider`, mirroring `profile_api.dart`), `plans_controller.dart`
+(`PlansController extends AsyncNotifier<List<PlanTemplate>>`, `build()` fetches,
+`refresh()` for pull-to-refresh + error retry), `plans_screen.dart` (replaces the
+`ComingSoon` placeholder — `AsyncValue.when` → spinner / retryable error / empty
+state / ranked `ListView`; top plan badged "Best match" when `matchScore > 0`;
+each card taps through to detail), and `plan_detail_screen.dart` (training days +
+per-exercise rows with a form-tracked vs reps-only badge keyed on the model's
+`formTracked`). No-logic-in-widgets respected: all I/O lives in the
+controller/API.
 
 The matching endpoint: `GET /plans/templates`, `requireAuth`, mounted at
 `/plans` in `app.js`. `routes/plan.routes.js` → `controllers/plan.controller.js`
@@ -133,7 +147,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M4 — Workout plans (general / free)  `[ ]`
 - [x] Template library seeded in backend
 - [x] Endpoint returns templates matched to profile
-- [ ] Plans list + detail UI
+- [x] Plans list + detail UI
 - [ ] Select / persist active plan
 
 ### M5 — Vitals dashboard  `[ ]`
@@ -184,6 +198,32 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M4 · Plans list + detail UI — the Plans tab now renders the
+  profile-ranked template library instead of a `ComingSoon` placeholder. New
+  `features/plans/`: `plan_models.dart` decodes the `GET /plans/templates` wire
+  shape (`PlanTemplate`/`PlanWorkout`/`PlanExercise`) with defensive `fromJson`
+  (missing/wrong-typed fields fall back, never throw) and humanized label
+  getters for the snake_case wire enums; `plan_api.dart`
+  (`PlanApi.fetchTemplates()` + `planApiProvider` over `apiClientProvider`,
+  mirroring `profile_api.dart`); `plans_controller.dart` (`PlansController
+  extends AsyncNotifier<List<PlanTemplate>>` — `build()` fetches once, `refresh()`
+  re-fetches for pull-to-refresh and the error-state retry). `plans_screen.dart`
+  renders the resulting `AsyncValue` via `.when` — a spinner, a retryable error
+  state, an empty state, or the ranked `ListView` (best-match-first from the
+  server; the top plan is badged "Best match for you" only when `matchScore > 0`,
+  i.e. the user has onboarded). Each card taps through to `plan_detail_screen.dart`,
+  which lists the plan's training days and, per exercise, a sets×reps + rest line
+  and a form-tracked vs reps-only badge keyed on the model's `formTracked` flag
+  (the glasses are first-person POV, so form correction is per-exercise). All I/O
+  stays in the controller/API per the no-logic-in-widgets rule; the widgets only
+  render state and forward taps. 10 new tests: `plan_models_test.dart` (4 — full
+  parse, enum humanizing, formTracked/prescription incl. the no-reps "3 sets"
+  case, graceful defaults on a sparse payload) and `plans_screen_test.dart` (6 —
+  loading spinner, ranked list with the top-match badge, no badge when unranked,
+  tap-through to detail showing exercises + both tracking badges, empty state,
+  and error→retry→recovered with auto-retry disabled). The shell test now stubs
+  `planApiProvider` (the Plans tab builds eagerly in the `IndexedStack`).
+  `flutter analyze` clean, `flutter test` 88/88 green.
 - 2026-06-26 · M4 · `GET /plans/templates` returns the seeded template library
   ranked against the caller's onboarding Profile. New
   `routes/plan.routes.js` → `controllers/plan.controller.js` →
