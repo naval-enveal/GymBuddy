@@ -14,7 +14,7 @@
 ---
 
 ## Next up
-**M0 · Scaffold & tooling** → Flutter app boots on a device/simulator.
+**M0 · Scaffold & tooling** → Express + Mongoose server boots with a health-check endpoint.
 
 ---
 
@@ -22,7 +22,7 @@
 
 ### M0 — Scaffold & tooling  `[ ]`
 - [x] Monorepo initialized (`app/`, `server/`, `docs/`, `.claude/`)
-- [ ] Flutter app boots on a device/simulator
+- [x] Flutter app boots on a device/simulator
 - [ ] Express + Mongoose server boots with a health-check endpoint
 - [ ] Riverpod wired into the app
 - [ ] Lint + `flutter analyze` configured, both clean
@@ -102,4 +102,5 @@
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M0 · Flutter app scaffolded (`flutter create`, org com.gymbuddy, android+ios); GymBuddyApp boot screen replaces the demo counter; widget smoke test verifies boot; `flutter analyze` + `flutter test` green.
 - 2026-06-26 · M0 · Monorepo initialized: app/, server/, docs/, .claude/ skeleton per PLAN, plus root .gitignore and README.
