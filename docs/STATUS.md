@@ -14,10 +14,10 @@
 ---
 
 ## Next up
-**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: Request
-validation + shared error response shape — validate request bodies at the edge
-(register/login/refresh/logout) and centralize the `{ error: { message } }`
-shape, replacing the ad-hoc guards currently in `auth.controller`.
+**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: Passing
+integration tests for the auth flow — end-to-end coverage of
+register/login/refresh/logout against an in-memory MongoDB, exercising the
+happy paths plus rotation/revocation and the shared error shape.
 
 ---
 
@@ -36,7 +36,7 @@ shape, replacing the ad-hoc guards currently in `auth.controller`.
 - [x] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
 - [x] JWT auth: register, login, refresh, logout (bcrypt)
 - [x] Auth middleware
-- [ ] Request validation + shared error response shape
+- [x] Request validation + shared error response shape
 - [ ] Passing integration tests for the auth flow
 
 ### M2 — Flutter foundation + design system + shell  `[ ]`
@@ -105,6 +105,25 @@ shape, replacing the ad-hoc guards currently in `auth.controller`.
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M1 · Request validation + a centralized shared error shape. New
+  generic `validate(schema)` middleware (`src/middleware/validate.middleware.js`)
+  checks/sanitizes `req.body` at the edge and, on the first violation, forwards a
+  400 `ApiError` with a clear message; on success it replaces `req.body` with
+  only the declared fields (unknown keys dropped, so a client can't smuggle
+  extra props into a `create`). Per-route schemas in
+  `src/validators/auth.validators.js`: register enforces email format + an 8–200
+  char password + ≤80 char displayName; login only requires a non-empty password
+  (≤200) so a too-short attempt still gets the same non-enumerating 401, not a
+  400; refresh/logout require `refreshToken`. Emails are trimmed + lowercased;
+  passwords/tokens are left byte-for-byte intact. New `errorHandler`
+  (`src/middleware/error.middleware.js`, mounted last in `app.js`) is now the
+  single owner of the `{ error: { message } }` shape — maps `ApiError`/`AuthError`
+  (any 4xx `statusCode`), dup-key 11000 → 409, Mongoose `ValidationError` → 400,
+  malformed JSON → 400, and everything else → opaque logged 500. `asyncHandler`
+  wraps the controllers so the ad-hoc `fail`/`handleServiceError`/`try-catch`
+  guards are gone — handlers now trust validated input and let errors propagate.
+  13 new Mongo-free validation tests (`tests/auth.validation.test.js`).
+  `npm run lint` clean, `npm test` 60/60 green.
 - 2026-06-26 · M1 · Auth middleware added (`src/middleware/auth.middleware.js`).
   `requireAuth` parses the `Authorization: Bearer <access>` header, verifies it
   via `token.service.verifyAccessToken`, loads the owning user, and attaches
