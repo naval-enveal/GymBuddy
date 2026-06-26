@@ -1,20 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:gymbuddy/core/app_info.dart';
+import 'package:gymbuddy/core/design/design.dart';
+import 'package:gymbuddy/core/network/api_client.dart';
+import 'package:gymbuddy/features/auth/auth_controller.dart';
+import 'package:gymbuddy/features/auth/auth_gate.dart';
 
 void main() {
   // ProviderScope is the root of Riverpod's state graph; every provider read in
   // the app resolves against it. Wiring it here (M0) lets later milestones add
   // providers without touching bootstrap.
-  runApp(const ProviderScope(child: GymBuddyApp()));
+  //
+  // The session-expiry hook is overridden here (composition root) so `core/`
+  // network code can sign the user out without an upward dependency on the auth
+  // feature: a dead refresh token drives the gate back to the signed-out flow.
+  runApp(
+    ProviderScope(
+      overrides: [
+        sessionExpiredProvider.overrideWith(
+          (ref) =>
+              () => ref.read(authControllerProvider.notifier).signOut(),
+        ),
+      ],
+      child: const GymBuddyApp(),
+    ),
+  );
 }
 
 /// Root application widget.
 ///
-/// Intentionally minimal for M0: it proves the app boots and renders a frame.
-/// The design system, routing, and feature screens are layered on in later
-/// milestones (see docs/PLAN.md).
+/// Boots straight into the [AuthGate], which decides between the signed-out
+/// flow and the authenticated app shell. Routing and feature screens are
+/// layered on from there (see docs/PLAN.md).
 class GymBuddyApp extends StatelessWidget {
   const GymBuddyApp({super.key});
 
@@ -23,51 +40,8 @@ class GymBuddyApp extends StatelessWidget {
     return MaterialApp(
       title: 'GymBuddy',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00E5A0),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      home: const BootScreen(),
-    );
-  }
-}
-
-/// Placeholder landing screen shown until the app shell ships in M2.
-///
-/// A [ConsumerWidget] so it can read [appInfoProvider] — the first consumer of
-/// Riverpod state in the app.
-class BootScreen extends ConsumerWidget {
-  const BootScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final appInfo = ref.watch(appInfoProvider);
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.fitness_center,
-              size: 72,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(height: 16),
-            Text(appInfo.name, style: theme.textTheme.headlineMedium),
-            const SizedBox(height: 8),
-            Text(
-              appInfo.tagline,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
+      theme: AppTheme.dark,
+      home: const AuthGate(),
     );
   }
 }

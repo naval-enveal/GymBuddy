@@ -14,11 +14,31 @@
 ---
 
 ## Next up
-**M2 · Flutter foundation + design system + shell** → next task: Design system
-in `core/design/` (theme, tokens, reusable widgets). M1 is fully complete; a PR
-into `dev` is open and awaits human review/merge before M2 begins. (Note: the
-Flutter SDK is absent in this build env — prior M0 entries confirm Dart tasks
-can't be analyzed/tested here, so M2 may require a human-run analyze.)
+**M2 is complete** — all four tasks are checked. A PR from `m2-flutter-shell`
+into `dev` ("Milestone M2: Flutter foundation + design system + shell") is open
+for human review; do not merge or cut the next branch. After it merges, the next
+run cuts a fresh branch from `dev` and starts **M3 · Onboarding** (first task:
+the 5–7 step flow — goals, experience, days/week, equipment, injuries, body
+stats).
+
+Auth is now fully wired end to end: the signed-out landing
+(`features/auth/signed_out_screen.dart`) routes into `features/auth/auth_screen.dart`
+(a single login/signup form, mode toggled in place), whose submission logic
+lives in `features/auth/auth_form_controller.dart`
+(`authFormControllerProvider`, `autoDispose`) — it calls
+`AuthController.signIn`/`register`, surfaces `ApiException.message`, and on
+success lets the gate swap in the shell while the screen pops itself. Field
+validation (email format, 8+ char password on register) is client-side; the
+network layer (`token_store.dart`, `api_client.dart` with the single-flight
+refresh-on-401 interceptor, `auth_api.dart`) is unchanged. The design system
+lives in `core/design/` (barrel `package:gymbuddy/core/design/design.dart`).
+(Note: the Flutter SDK is present at `/opt/flutter/bin` but not on `PATH` —
+prepend it before running `flutter analyze`/`test`. Riverpod is 3.x: a notifier
+extends `Notifier<T>` and `autoDispose` is set on the provider
+(`NotifierProvider.autoDispose<C, T>`); a notifier must not touch `state` before
+its `build()` runs. Dev API base URL defaults to `http://10.0.2.2:4000` — the
+Android-emulator alias for the host's dev server on port 4000; override
+`apiBaseUrlProvider` per environment.)
 
 ---
 
@@ -41,10 +61,10 @@ can't be analyzed/tested here, so M2 may require a human-run analyze.)
 - [x] Passing integration tests for the auth flow
 
 ### M2 — Flutter foundation + design system + shell  `[ ]`
-- [ ] Design system in `core/design/` (theme, tokens, reusable widgets)
-- [ ] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
-- [ ] API client with secure token storage + refresh interceptor
-- [ ] Login / signup screens wired to M1 endpoints
+- [x] Design system in `core/design/` (theme, tokens, reusable widgets)
+- [x] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
+- [x] API client with secure token storage + refresh interceptor
+- [x] Login / signup screens wired to M1 endpoints
 
 ### M3 — Onboarding  `[ ]`
 - [ ] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
@@ -106,6 +126,113 @@ can't be analyzed/tested here, so M2 may require a human-run analyze.)
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M2 · Login / signup screens wired to the M1 `/auth/*` endpoints,
+  completing M2. New `features/auth/auth_screen.dart` is one form serving both
+  modes (toggled in place via an `auth-toggle` button) so the user can switch
+  between logging in and creating an account without losing context: an email
+  field, a password field, and — in register mode only — an optional name field.
+  Submission logic stays out of the widget per the no-logic-in-widgets rule: the
+  new `features/auth/auth_form_controller.dart` (`authFormControllerProvider`, an
+  `autoDispose` `Notifier<AuthFormState>`) owns the network exchange. Its
+  `submit({mode, email, password, displayName})` calls
+  `AuthController.signIn`/`register`, returns `true` on success (leaving
+  `submitting` true so the button can't re-fire before the gate tears the screen
+  down) and on an `ApiException` captures `message` into `AuthFormState.errorMessage`
+  and returns `false`; a second submit while one is in flight is ignored, and
+  `clearError()` wipes a stale error on mode-toggle. The screen runs client-side
+  validation (email format; 8+ char password on register, matching the server's
+  register rule; login only requires non-empty) before any network call, shows
+  the server error inline (`auth-error`), and on success pops itself so the gate
+  (now authenticated) reveals the shell. `SignedOutScreen` now routes into the
+  auth screen — "Get started" → register mode, "I already have an account" →
+  sign-in mode — replacing the transitional `signInForPreview`, which is deleted
+  from `AuthController`. 10 new tests (`auth_form_controller_test.dart` 5:
+  register/login success, error surfacing, clearError, single-flight;
+  `auth_screen_test.dart` 4: empty-field block skips the network, short-password
+  rejection, mode toggle shows/hides the name field, backend-error surfacing);
+  `auth_gate_test.dart` rewritten to drive the real form (mocked `ApiClient`)
+  through landing → form → shell → sign out. `flutter analyze` clean, `flutter
+  test` 53/53 green.
+- 2026-06-26 · M2 · API client + secure token storage + refresh interceptor, and
+  `AuthController` wired to the M1 `/auth/*` endpoints. New `core/storage/token_store.dart`:
+  `AuthTokens` (value type) behind a `TokenStore` interface with `SecureTokenStore`
+  (OS keychain/keystore via `flutter_secure_storage`; reads/clears swallow
+  platform/read failures so a host with no secure storage degrades to a
+  signed-out session rather than crashing) and `InMemoryTokenStore` (tests),
+  exposed via `tokenStoreProvider`. New `core/network/api_client.dart`: `ApiClient`
+  is a thin JSON-over-HTTP client (on `package:http`) that injects
+  `Authorization: Bearer <access>` on authenticated calls and runs the refresh
+  interceptor — on a `401` it exchanges the refresh token at `/auth/refresh`,
+  persists the rotated pair, and replays the original request exactly once;
+  concurrent 401s share one in-flight refresh (so the refresh token rotates at
+  most once); a failed refresh clears tokens, fires `onSessionExpired`, and
+  surfaces the original 401 as an `ApiException` (whose message is lifted from
+  the backend's shared `{ error: { message } }` shape). `core/` stays free of any
+  upward dependency on the auth feature: the expiry hook is a no-op
+  `sessionExpiredProvider` that `main.dart` (the composition root) overrides to
+  call `AuthController.signOut`. New `features/auth/auth_api.dart` (`AuthApi`)
+  types the `/auth/{register,login,logout}` calls into `AuthSession`
+  (`AuthUser` + `AuthTokens`). `AuthController` now: `build()` returns
+  `AuthStatus.unknown` and restores the session from the token store at launch
+  (tokens present → authenticated, optimistic — an expired access token is
+  repaired by the interceptor on the first protected call, a dead refresh token
+  routes back through `signOut`; else → unauthenticated), `signIn`/`register`
+  exchange credentials via `AuthApi` and persist the issued pair, `signOut`
+  clears tokens then best-effort revokes server-side. The transitional
+  signed-out landing keeps a credential-free `signInForPreview` until the login
+  screens land next. 19 new tests (token store 4, ApiClient 7 incl. refresh /
+  single-flight / failed-refresh, AuthApi 3, AuthController 5 incl.
+  restore/persist/clear); existing gate + boot widget tests updated to seed an
+  empty `InMemoryTokenStore` and settle past the new restore splash. Added deps
+  `http` + `flutter_secure_storage`. `flutter analyze` clean, `flutter test`
+  43/43 green.
+- 2026-06-26 · M2 · App shell + four-tab bottom nav, behind a single auth gate.
+  `AuthGate` (`features/auth/`) is the one place the app branches on auth: it
+  watches `authControllerProvider` and renders the `AppShell` when
+  authenticated, the `SignedOutScreen` when not, and a splash while session
+  restore is pending (`AuthStatus.unknown`, reserved for the next token-storage
+  task). `AuthController` is a thin in-memory `Notifier<AuthStatus>` stub
+  (`signIn`/`signOut`) so the gate is real and testable now; credential exchange
+  lands next. `AppShell` is a Material 3 `NavigationBar` over an `IndexedStack`
+  (tab bodies kept alive across switches) with the four primary destinations —
+  Home, Plans, Workout, Profile. Selected-tab index lives in Riverpod
+  (`shellTabProvider`, an `autoDispose` `NotifierProvider`) rather than widget
+  state, per the no-logic-in-widgets rule, so it survives rebuilds and is
+  test-inspectable; `autoDispose` resets it to Home on a fresh sign-in. Home /
+  Plans / Workout are on-brand `ComingSoon` placeholders (filled in M3–M6);
+  Profile hosts the `signOut` action so the gate has a way back; the
+  `SignedOutScreen` shows branding from `appInfoProvider` + a "Get started" CTA
+  that calls `signIn`. `main.dart` boots straight into `AuthGate`. Reconciled
+  the shell/auth code (committed earlier as a pre-run checkpoint) with
+  Riverpod 3.x: replaced the legacy `StateProvider` with a `ShellTabController
+  extends Notifier<int>`, switched the test override to a zero-arg factory, and
+  fixed the authenticated-container helper to use an `AuthController` subclass
+  whose `build()` returns authenticated (a notifier can't set `state` before
+  `build()` runs). 5 new tests (`test/features/auth/auth_gate_test.dart` walks
+  signed-out → sign in → shell → sign out; `test/features/shell/app_shell_test.dart`
+  covers the four destinations + tab switching). `flutter analyze` clean,
+  `flutter test` 24/24 green.
+- 2026-06-26 · M2 · Design system landed in `app/lib/core/design/`, the
+  foundation all feature UI builds on (imported via the barrel
+  `core/design/design.dart`). Tokens centralize the visual language: `AppColors`
+  (dark-first near-black surface ramp + the single energetic accent `0xFF00E5A0`
+  with an `onAccent` near-black for legible text over it), `AppSpacing` (8pt
+  grid + `minTouchTarget` 48), `AppRadii`, `AppDurations`, and `AppTypography`
+  — whose numeric styles use `FontFeature.tabularFigures` so in-workout counters
+  and timers don't jitter as digit widths change. `AppTheme.dark` overrides
+  Material 3 heavily (near-black scaffold, flat un-elevated cards, pill primary
+  buttons sized to the 48dp target, accent-focused inputs). Five reusable
+  widgets, all purely presentational (logic stays in providers per the
+  no-logic-in-widgets rule): `PrimaryButton` (full-width pill CTA with disabled +
+  loading states, where loading uses an accent spinner that stays visible
+  against the disabled surface), `MetricTile` (labelled dashboard metric),
+  `StatRing` (CustomPainter ring sweeping from 12 o'clock, progress clamped to
+  [0,1]), `RepCounter` (huge glanceable rep numeral + optional target), and
+  `RestTimer` (depleting ring + m:ss readout, guards zero/negative inputs, turns
+  warning-colored under 10s). `main.dart` now uses `AppTheme.dark`. 19 widget +
+  theme tests (`test/core/design/`) covering callbacks, tap-gating while loading,
+  value formatting, and out-of-range clamping. `flutter analyze` clean, `flutter
+  test` 19/19 green. (Flutter 3.44.4 lives at `/opt/flutter/bin`, not on PATH.)
 - 2026-06-26 · M1 · End-to-end auth-flow integration tests
   (`tests/auth.flow.test.js`), completing M1. Where `auth.test.js` exercises
   each endpoint in isolation and `auth.middleware.test.js` mounts `requireAuth`
