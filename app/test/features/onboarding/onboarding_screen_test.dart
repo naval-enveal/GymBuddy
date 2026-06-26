@@ -6,13 +6,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/health/health_permission_service.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_screen.dart';
 
-Future<ProviderContainer> _pump(WidgetTester tester) async {
-  final container = ProviderContainer();
-  addTearDown(container.dispose);
+/// A health-permission service returning a fixed [status].
+class _FakeHealthPermissionService implements HealthPermissionService {
+  _FakeHealthPermissionService(this.status);
+
+  final HealthPermissionStatus status;
+
+  @override
+  Future<HealthPermissionStatus> request() async => status;
+}
+
+Future<void> _mount(WidgetTester tester, ProviderContainer container) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -20,6 +29,12 @@ Future<ProviderContainer> _pump(WidgetTester tester) async {
     ),
   );
   await tester.pumpAndSettle();
+}
+
+Future<ProviderContainer> _pump(WidgetTester tester) async {
+  final container = ProviderContainer();
+  addTearDown(container.dispose);
+  await _mount(tester, container);
   return container;
 }
 
@@ -42,7 +57,7 @@ void main() {
     await _pump(tester);
 
     expect(find.text('What are your goals?'), findsOneWidget);
-    expect(find.text('Step 1 of 6'), findsOneWidget);
+    expect(find.text('Step 1 of 7'), findsOneWidget);
     expect(_continueEnabled(tester), isFalse);
 
     await tester.tap(find.byKey(const Key('goal-build_muscle')));
@@ -62,12 +77,12 @@ void main() {
     await tester.tap(find.byKey(const Key('onboarding-next')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Step 2 of 6'), findsOneWidget);
+    expect(find.text('Step 2 of 7'), findsOneWidget);
     expect(find.byKey(const Key('onboarding-back')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('onboarding-back')));
     await tester.pumpAndSettle();
-    expect(find.text('Step 1 of 6'), findsOneWidget);
+    expect(find.text('Step 1 of 7'), findsOneWidget);
   });
 
   testWidgets('walks every step and finishing flips completed',
@@ -99,7 +114,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 5 · Injuries (optional) — Continue is enabled immediately.
-    expect(find.text('Step 5 of 6'), findsOneWidget);
+    expect(find.text('Step 5 of 7'), findsOneWidget);
     expect(_continueEnabled(tester), isTrue);
     await tester.enterText(find.byKey(const Key('injury-field')), 'lower back');
     await tester.tap(find.byKey(const Key('injury-add')));
@@ -108,12 +123,25 @@ void main() {
     await tester.tap(find.byKey(const Key('onboarding-next')));
     await tester.pumpAndSettle();
 
-    // 6 · Body stats (optional) — finish.
-    expect(find.text('Step 6 of 6'), findsOneWidget);
+    // 6 · Body stats (optional) — Continue on to the final step.
+    expect(find.text('Step 6 of 7'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('bodystat-height')), '180');
     await tester.enterText(find.byKey(const Key('bodystat-weight')), '78');
     await tester.tap(find.byKey(const Key('sex-male')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+
+    // 7 · Health permission (optional) — connect, then finish.
+    expect(find.text('Step 7 of 7'), findsOneWidget);
+    expect(find.text('Connect your health data'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('health-connect')));
+    await tester.pumpAndSettle();
+    // The default MockHealthPermissionService grants.
+    expect(
+      _state(container).draft.healthPermission,
+      HealthPermissionStatus.granted,
+    );
 
     expect(_state(container).completed, isFalse);
     await tester.tap(find.byKey(const Key('onboarding-next')));
@@ -155,5 +183,48 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_state(container).draft.bodyStats.age, isNull);
+  });
+
+  testWidgets('health step surfaces a denial without blocking finish',
+      (WidgetTester tester) async {
+    final container = ProviderContainer(
+      overrides: [
+        healthPermissionServiceProvider.overrideWithValue(
+          _FakeHealthPermissionService(HealthPermissionStatus.denied),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await _mount(tester, container);
+    final controller = container.read(onboardingControllerProvider.notifier);
+
+    // Fast-forward to the final (health) step via the controller.
+    controller
+      ..toggleGoal(FitnessGoal.loseWeight)
+      ..next()
+      ..setExperience(ExperienceLevel.beginner)
+      ..next()
+      ..setDaysPerWeek(3)
+      ..next()
+      ..toggleEquipment(Equipment.bodyweight)
+      ..next()
+      ..next()
+      ..next();
+    await tester.pumpAndSettle();
+    expect(_state(container).step, OnboardingStep.healthPermission);
+
+    // A denial is recorded and shown, but the step is still finishable.
+    await tester.tap(find.byKey(const Key('health-connect')));
+    await tester.pumpAndSettle();
+    expect(
+      _state(container).draft.healthPermission,
+      HealthPermissionStatus.denied,
+    );
+    expect(find.byKey(const Key('health-status')), findsOneWidget);
+
+    expect(_continueEnabled(tester), isTrue);
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+    expect(_state(container).completed, isTrue);
   });
 }

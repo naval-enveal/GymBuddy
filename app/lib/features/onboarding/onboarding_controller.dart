@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:gymbuddy/core/health/health_permission_service.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 
 /// Valid ranges for body-stat inputs, mirrored from the Profile model's schema
@@ -28,6 +29,7 @@ enum OnboardingStep {
   equipment,
   injuries,
   bodyStats,
+  healthPermission,
 }
 
 /// Optional physical stats captured on the final step. Every field is
@@ -79,6 +81,7 @@ class OnboardingDraft {
     this.equipment = const {},
     this.injuries = const [],
     this.bodyStats = const BodyStats(),
+    this.healthPermission = HealthPermissionStatus.notRequested,
   });
 
   final Set<FitnessGoal> goals;
@@ -88,6 +91,10 @@ class OnboardingDraft {
   final List<String> injuries;
   final BodyStats bodyStats;
 
+  /// Result of the health-data permission ask. A device-level grant, so it's
+  /// kept here for the flow but isn't part of the Profile API payload.
+  final HealthPermissionStatus healthPermission;
+
   OnboardingDraft copyWith({
     Set<FitnessGoal>? goals,
     ExperienceLevel? experience,
@@ -95,6 +102,7 @@ class OnboardingDraft {
     Set<Equipment>? equipment,
     List<String>? injuries,
     BodyStats? bodyStats,
+    HealthPermissionStatus? healthPermission,
   }) =>
       OnboardingDraft(
         goals: goals ?? this.goals,
@@ -103,6 +111,7 @@ class OnboardingDraft {
         equipment: equipment ?? this.equipment,
         injuries: injuries ?? this.injuries,
         bodyStats: bodyStats ?? this.bodyStats,
+        healthPermission: healthPermission ?? this.healthPermission,
       );
 }
 
@@ -113,6 +122,7 @@ class OnboardingState {
     this.stepIndex = 0,
     this.draft = const OnboardingDraft(),
     this.completed = false,
+    this.requestingHealth = false,
   });
 
   /// Index into [OnboardingStep.values] for the visible step.
@@ -124,6 +134,10 @@ class OnboardingState {
   /// True once the user finishes the last step. Persisting the [draft] and
   /// routing onward are wired in later M3 tasks; this flag marks the handoff.
   final bool completed;
+
+  /// True while the health-permission prompt is in flight, so the step's
+  /// "Connect" button shows a spinner and can't be re-fired.
+  final bool requestingHealth;
 
   OnboardingStep get step => OnboardingStep.values[stepIndex];
 
@@ -140,11 +154,13 @@ class OnboardingState {
     int? stepIndex,
     OnboardingDraft? draft,
     bool? completed,
+    bool? requestingHealth,
   }) =>
       OnboardingState(
         stepIndex: stepIndex ?? this.stepIndex,
         draft: draft ?? this.draft,
         completed: completed ?? this.completed,
+        requestingHealth: requestingHealth ?? this.requestingHealth,
       );
 }
 
@@ -225,6 +241,26 @@ class OnboardingController extends Notifier<OnboardingState> {
     state = state.copyWith(draft: state.draft.copyWith(bodyStats: stats));
   }
 
+  /// Prompts for health-data access via [healthPermissionServiceProvider] and
+  /// records the outcome on the draft. The platform talks to HealthKit /
+  /// Health Connect; feature code only sees the resulting status. No-ops if a
+  /// request is already in flight. The step is optional, so a denial or an
+  /// unavailable platform never blocks finishing.
+  Future<void> requestHealthPermission() async {
+    if (state.requestingHealth) return;
+    state = state.copyWith(requestingHealth: true);
+    final HealthPermissionStatus status;
+    try {
+      status = await ref.read(healthPermissionServiceProvider).request();
+    } finally {
+      // Always clear the in-flight flag, even if the platform call throws.
+      state = state.copyWith(requestingHealth: false);
+    }
+    state = state.copyWith(
+      draft: state.draft.copyWith(healthPermission: status),
+    );
+  }
+
   /// Whether the current step's requirement is met, gating the Next button.
   /// Injuries and body stats are optional, so they never block.
   bool get canAdvance {
@@ -239,6 +275,7 @@ class OnboardingController extends Notifier<OnboardingState> {
         return state.draft.equipment.isNotEmpty;
       case OnboardingStep.injuries:
       case OnboardingStep.bodyStats:
+      case OnboardingStep.healthPermission:
         return true;
     }
   }

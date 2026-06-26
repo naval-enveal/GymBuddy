@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/design/design.dart';
+import 'package:gymbuddy/core/health/health_permission_service.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 
@@ -13,11 +16,13 @@ import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 /// only renders [OnboardingState] and forwards taps. The body-stats step keeps
 /// local [TextEditingController]s for its text inputs and does presentation-level
 /// range parsing before handing values to the controller (mirroring the pattern
-/// in `AuthScreen`).
+/// in `AuthScreen`). The final health-permission step forwards its "Connect" tap
+/// to the controller, which drives the platform prompt through
+/// [healthPermissionServiceProvider].
 ///
-/// Persisting the draft (Profile API), the health-permission step, and routing
-/// to Home on completion land in later M3 tasks; this screen drives the answers
-/// and flips [OnboardingState.completed] when the user finishes.
+/// Persisting the draft (Profile API) and routing to Home on completion land in
+/// later M3 tasks; this screen drives the answers and flips
+/// [OnboardingState.completed] when the user finishes.
 class OnboardingScreen extends ConsumerWidget {
   const OnboardingScreen({super.key});
 
@@ -98,6 +103,8 @@ class _StepBody extends StatelessWidget {
         return _InjuriesStep(state: state, controller: controller);
       case OnboardingStep.bodyStats:
         return _BodyStatsStep(state: state, controller: controller);
+      case OnboardingStep.healthPermission:
+        return _HealthPermissionStep(state: state, controller: controller);
     }
   }
 }
@@ -594,5 +601,92 @@ class _NumberField extends StatelessWidget {
       decoration: InputDecoration(labelText: label),
       onChanged: onChanged,
     );
+  }
+}
+
+/// The closing step: asks for read access to the device's health data so the
+/// M5 vitals dashboard can show resting HR, HRV, sleep, and readiness. Optional
+/// — the bottom "Finish" button completes the flow whether or not the user
+/// connects, and a denial doesn't block. The actual prompt is driven by the
+/// controller through [healthPermissionServiceProvider]; this step only renders
+/// the rationale, the "Connect" action, and the recorded outcome.
+class _HealthPermissionStep extends StatelessWidget {
+  const _HealthPermissionStep({required this.state, required this.controller});
+
+  final OnboardingState state;
+  final OnboardingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = state.draft.healthPermission;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _StepHeader(
+          title: 'Connect your health data',
+          subtitle: 'Optional. GymBuddy reads vitals to gauge recovery and '
+              'tailor each session. Your data stays on your device unless you '
+              'choose to sync.',
+        ),
+        for (final line in const [
+          'Resting heart rate & HRV',
+          'Sleep & steps',
+          'A daily readiness signal',
+        ])
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Row(
+              children: [
+                const Icon(Icons.check, color: AppColors.accent, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(child: Text(line, style: theme.textTheme.bodyLarge)),
+              ],
+            ),
+          ),
+        const SizedBox(height: AppSpacing.lg),
+        PrimaryButton(
+          key: const Key('health-connect'),
+          label: status == HealthPermissionStatus.granted
+              ? 'Connected'
+              : 'Connect health data',
+          icon: status == HealthPermissionStatus.granted
+              ? Icons.check_circle
+              : Icons.favorite_outline,
+          isLoading: state.requestingHealth,
+          // Once granted there's nothing more to ask; disable the re-tap.
+          onPressed: status == HealthPermissionStatus.granted
+              ? null
+              : () => unawaited(controller.requestHealthPermission()),
+        ),
+        if (_feedback(status) case final message?) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            key: const Key('health-status'),
+            message,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// User-facing note for a recorded [status]; null before the first ask, when
+  /// there's nothing to report.
+  String? _feedback(HealthPermissionStatus status) {
+    switch (status) {
+      case HealthPermissionStatus.notRequested:
+        return null;
+      case HealthPermissionStatus.granted:
+        return 'Health data connected. You can finish setting up.';
+      case HealthPermissionStatus.denied:
+        return "No problem — you can connect later in Settings. We'll show "
+            'manual stats in the meantime.';
+      case HealthPermissionStatus.unavailable:
+        return "Health data isn't available on this device. You can finish "
+            'and add stats manually.';
+    }
   }
 }

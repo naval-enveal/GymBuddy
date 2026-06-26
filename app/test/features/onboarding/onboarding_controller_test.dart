@@ -4,8 +4,24 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/health/health_permission_service.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
+
+/// A health-permission service returning a fixed [status], for driving the
+/// onboarding step's outcomes without touching a real platform store.
+class _FakeHealthPermissionService implements HealthPermissionService {
+  _FakeHealthPermissionService(this.status);
+
+  final HealthPermissionStatus status;
+  int calls = 0;
+
+  @override
+  Future<HealthPermissionStatus> request() async {
+    calls++;
+    return status;
+  }
+}
 
 void main() {
   late ProviderContainer container;
@@ -116,7 +132,7 @@ void main() {
   });
 
   test('complete flips completed only when the last step is satisfied', () {
-    // Reach the last step.
+    // Reach the last step (health permission).
     controller().toggleGoal(FitnessGoal.loseWeight);
     controller().next();
     controller().setExperience(ExperienceLevel.beginner);
@@ -126,8 +142,67 @@ void main() {
     controller().toggleEquipment(Equipment.bodyweight);
     controller().next();
     controller().next();
-    expect(state().step, OnboardingStep.bodyStats);
+    controller().next();
+    expect(state().step, OnboardingStep.healthPermission);
     controller().complete();
     expect(state().completed, isTrue);
+  });
+
+  test('health permission is optional and starts unrequested', () {
+    expect(
+      state().draft.healthPermission,
+      HealthPermissionStatus.notRequested,
+    );
+    // The health step never blocks advancing.
+    controller().toggleGoal(FitnessGoal.loseWeight);
+    controller().next();
+    controller().setExperience(ExperienceLevel.beginner);
+    controller().next();
+    controller().setDaysPerWeek(3);
+    controller().next();
+    controller().toggleEquipment(Equipment.bodyweight);
+    controller().next();
+    controller().next();
+    controller().next();
+    expect(state().step, OnboardingStep.healthPermission);
+    expect(controller().canAdvance, isTrue);
+  });
+
+  test('requestHealthPermission records the service outcome', () async {
+    final fake = _FakeHealthPermissionService(HealthPermissionStatus.granted);
+    final c = ProviderContainer(
+      overrides: [
+        healthPermissionServiceProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(c.dispose);
+
+    final ctrl = c.read(onboardingControllerProvider.notifier);
+    await ctrl.requestHealthPermission();
+
+    expect(fake.calls, 1);
+    expect(
+      c.read(onboardingControllerProvider).draft.healthPermission,
+      HealthPermissionStatus.granted,
+    );
+    expect(c.read(onboardingControllerProvider).requestingHealth, isFalse);
+  });
+
+  test('requestHealthPermission records a denial too', () async {
+    final fake = _FakeHealthPermissionService(HealthPermissionStatus.denied);
+    final c = ProviderContainer(
+      overrides: [
+        healthPermissionServiceProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(c.dispose);
+
+    final ctrl = c.read(onboardingControllerProvider.notifier);
+    await ctrl.requestHealthPermission();
+
+    expect(
+      c.read(onboardingControllerProvider).draft.healthPermission,
+      HealthPermissionStatus.denied,
+    );
   });
 }

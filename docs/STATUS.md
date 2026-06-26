@@ -15,23 +15,30 @@
 
 ## Next up
 **M3 · Onboarding is underway** on branch `m3-onboarding` (cut from `dev` after
-M2 merged). The 5–7 step flow is built: `features/onboarding/onboarding_screen.dart`
-(`OnboardingScreen`, a `ConsumerWidget`) renders the six steps — goals,
-experience, days/week, equipment, injuries, body stats — driven entirely by
-`onboardingControllerProvider` (`OnboardingController`/`OnboardingState`/
-`OnboardingDraft` in `onboarding_controller.dart`; the wire-mirrored answer
-enums in `onboarding_options.dart`). The screen is pure presentation: a
-per-step `Continue`/`Finish` gated on `controller.canAdvance`, a Back button
-(hidden on step 1), a `Step X of N` progress bar, and the body-stats step does
-presentation-level range parsing before handing values to the controller.
+M2 merged). The flow is now seven steps: `features/onboarding/onboarding_screen.dart`
+(`OnboardingScreen`, a `ConsumerWidget`) renders goals, experience, days/week,
+equipment, injuries, body stats, and a closing health-data permission step,
+driven entirely by `onboardingControllerProvider`
+(`OnboardingController`/`OnboardingState`/`OnboardingDraft` in
+`onboarding_controller.dart`; the wire-mirrored answer enums in
+`onboarding_options.dart`). The screen is pure presentation: a per-step
+`Continue`/`Finish` gated on `controller.canAdvance`, a Back button (hidden on
+step 1), a `Step X of N` progress bar, body-stats range parsing, and the final
+step's `health-connect` button forwarding to
+`OnboardingController.requestHealthPermission()`. That permission ask goes
+through `core/health/health_permission_service.dart`
+(`HealthPermissionService` interface + default `MockHealthPermissionService`,
+`healthPermissionServiceProvider`) — the M5 HealthKit / Health Connect impls
+override that provider; the resulting `HealthPermissionStatus` lands on the
+draft (kept client-side, not part of the Profile payload).
 
-**Next task: the health-data permission request step.** Then answers persisted
-via the Profile API (`POST`/`PUT` profile, mapping `OnboardingDraft` → the
-Profile model's `goals/experience/daysPerWeek/equipment/injuries/bodyStats`
-wire shape — `OnboardingController.complete()` already flips
-`OnboardingState.completed` as the handoff point), then routing to Home on
-completion (no router yet — `OnboardingScreen` does not navigate on
-`completed`; wire that with the routing task, likely via the `AuthGate`).
+**Next task: answers persisted via the Profile API** (`POST`/`PUT` profile,
+mapping `OnboardingDraft` → the Profile model's
+`goals/experience/daysPerWeek/equipment/injuries/bodyStats` wire shape —
+`OnboardingController.complete()` already flips `OnboardingState.completed` as
+the handoff point), then routing to Home on completion (no router yet —
+`OnboardingScreen` does not navigate on `completed`; wire that with the routing
+task, likely via the `AuthGate`).
 
 Auth is now fully wired end to end: the signed-out landing
 (`features/auth/signed_out_screen.dart`) routes into `features/auth/auth_screen.dart`
@@ -80,7 +87,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M3 — Onboarding  `[ ]`
 - [x] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
-- [ ] Health-data permission request step
+- [x] Health-data permission request step
 - [ ] Answers persisted via Profile API
 - [ ] Routes to Home on completion
 
@@ -138,6 +145,32 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M3 · Health-data permission request step added as the closing
+  (7th) onboarding step. New `core/health/health_permission_service.dart`
+  abstracts the platform health-permission prompt behind a
+  `HealthPermissionService` interface (`Future<HealthPermissionStatus> request()`,
+  status one of `notRequested`/`granted`/`denied`/`unavailable`) — feature code
+  never touches HealthKit / Health Connect directly, the same rule the sensor
+  layer follows. The default `MockHealthPermissionService` (exposed via
+  `healthPermissionServiceProvider`) grants immediately so the flow and dev
+  builds work end to end with no platform store attached; M5 overrides the
+  provider with the real `health`-package impls. `OnboardingController` gains
+  `OnboardingStep.healthPermission`, a `HealthPermissionStatus` field on
+  `OnboardingDraft` (kept on the draft for the flow but NOT mapped into the
+  Profile payload — it's a device-level grant), a transient
+  `OnboardingState.requestingHealth` in-flight flag, and an async
+  `requestHealthPermission()` that calls the service through `ref`, records the
+  outcome, and always clears the in-flight flag (even if the platform call
+  throws). The step is optional — `canAdvance` is always true there, so a
+  denial / unavailable platform never blocks finishing. The screen's
+  `_HealthPermissionStep` renders the rationale + what's read, a `health-connect`
+  `PrimaryButton` (spinner while in flight, disabled once granted), and a
+  `health-status` feedback line per outcome; `Finish` still completes the flow
+  whether or not the user connects. 5 new tests (3 controller: optional/starts
+  unrequested, records grant + clears flag, records denial; 2 widget: the full
+  seven-step walk now connects health before finishing, and a denial is shown
+  yet still finishable) plus the existing six-step assertions updated to seven.
+  `flutter analyze` clean, `flutter test` 72/72 green.
 - 2026-06-26 · M3 · The 5–7 step onboarding flow UI shipped. New
   `features/onboarding/onboarding_screen.dart` (`OnboardingScreen`, a
   `ConsumerWidget`) renders the six steps — goals (multi-select), experience
