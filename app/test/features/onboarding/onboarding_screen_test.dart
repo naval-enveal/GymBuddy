@@ -7,9 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymbuddy/core/health/health_permission_service.dart';
+import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_screen.dart';
+import 'package:gymbuddy/features/onboarding/profile_api.dart';
 
 /// A health-permission service returning a fixed [status].
 class _FakeHealthPermissionService implements HealthPermissionService {
@@ -19,6 +21,21 @@ class _FakeHealthPermissionService implements HealthPermissionService {
 
   @override
   Future<HealthPermissionStatus> request() async => status;
+}
+
+/// A [ProfileApi] that records the save and optionally fails, so the screen's
+/// "Finish" path never touches a real backend.
+class _FakeProfileApi implements ProfileApi {
+  _FakeProfileApi({this.error});
+
+  final Object? error;
+  int calls = 0;
+
+  @override
+  Future<void> saveOnboarding(OnboardingDraft draft) async {
+    calls++;
+    if (error != null) throw error!;
+  }
 }
 
 Future<void> _mount(WidgetTester tester, ProviderContainer container) async {
@@ -32,7 +49,9 @@ Future<void> _mount(WidgetTester tester, ProviderContainer container) async {
 }
 
 Future<ProviderContainer> _pump(WidgetTester tester) async {
-  final container = ProviderContainer();
+  final container = ProviderContainer(
+    overrides: [profileApiProvider.overrideWithValue(_FakeProfileApi())],
+  );
   addTearDown(container.dispose);
   await _mount(tester, container);
   return container;
@@ -189,6 +208,7 @@ void main() {
       (WidgetTester tester) async {
     final container = ProviderContainer(
       overrides: [
+        profileApiProvider.overrideWithValue(_FakeProfileApi()),
         healthPermissionServiceProvider.overrideWithValue(
           _FakeHealthPermissionService(HealthPermissionStatus.denied),
         ),
@@ -226,5 +246,41 @@ void main() {
     await tester.tap(find.byKey(const Key('onboarding-next')));
     await tester.pumpAndSettle();
     expect(_state(container).completed, isTrue);
+  });
+
+  testWidgets('a failed save surfaces an inline error and stays incomplete',
+      (WidgetTester tester) async {
+    final container = ProviderContainer(
+      overrides: [
+        profileApiProvider.overrideWithValue(
+          _FakeProfileApi(error: const ApiException(500, 'Could not save')),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await _mount(tester, container);
+    final controller = container.read(onboardingControllerProvider.notifier);
+
+    // Fast-forward to the final step with a valid draft.
+    controller
+      ..toggleGoal(FitnessGoal.loseWeight)
+      ..next()
+      ..setExperience(ExperienceLevel.beginner)
+      ..next()
+      ..setDaysPerWeek(3)
+      ..next()
+      ..toggleEquipment(Equipment.bodyweight)
+      ..next()
+      ..next()
+      ..next();
+    await tester.pumpAndSettle();
+    expect(_state(container).step, OnboardingStep.healthPermission);
+
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+
+    expect(_state(container).completed, isFalse);
+    expect(find.byKey(const Key('onboarding-save-error')), findsOneWidget);
+    expect(find.text('Could not save'), findsOneWidget);
   });
 }

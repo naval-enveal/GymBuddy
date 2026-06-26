@@ -5,8 +5,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymbuddy/core/health/health_permission_service.dart';
+import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
+import 'package:gymbuddy/features/onboarding/profile_api.dart';
 
 /// A health-permission service returning a fixed [status], for driving the
 /// onboarding step's outcomes without touching a real platform store.
@@ -23,11 +25,36 @@ class _FakeHealthPermissionService implements HealthPermissionService {
   }
 }
 
+/// A [ProfileApi] that records the saved draft and optionally throws, so
+/// `complete()` can be exercised without a real backend.
+class _FakeProfileApi implements ProfileApi {
+  _FakeProfileApi({this.error});
+
+  final Object? error;
+  int calls = 0;
+  OnboardingDraft? saved;
+
+  @override
+  Future<void> saveOnboarding(OnboardingDraft draft) async {
+    calls++;
+    saved = draft;
+    if (error != null) throw error!;
+  }
+}
+
 void main() {
+  late _FakeProfileApi profileApi;
   late ProviderContainer container;
 
+  ProviderContainer makeContainer({Object? saveError}) {
+    profileApi = _FakeProfileApi(error: saveError);
+    return ProviderContainer(
+      overrides: [profileApiProvider.overrideWithValue(profileApi)],
+    );
+  }
+
   setUp(() {
-    container = ProviderContainer();
+    container = makeContainer();
   });
 
   tearDown(() {
@@ -131,21 +158,62 @@ void main() {
     expect(controller().canAdvance, isTrue);
   });
 
-  test('complete flips completed only when the last step is satisfied', () {
-    // Reach the last step (health permission).
-    controller().toggleGoal(FitnessGoal.loseWeight);
-    controller().next();
-    controller().setExperience(ExperienceLevel.beginner);
-    controller().next();
-    controller().setDaysPerWeek(3);
-    controller().next();
-    controller().toggleEquipment(Equipment.bodyweight);
-    controller().next();
-    controller().next();
-    controller().next();
+  /// Walks the controller to the final (health-permission) step with a valid
+  /// draft, ready for [OnboardingController.complete].
+  void walkToLastStep() {
+    controller()
+      ..toggleGoal(FitnessGoal.loseWeight)
+      ..next()
+      ..setExperience(ExperienceLevel.beginner)
+      ..next()
+      ..setDaysPerWeek(3)
+      ..next()
+      ..toggleEquipment(Equipment.dumbbells)
+      ..next()
+      ..addInjury('left knee')
+      ..next()
+      ..next();
+  }
+
+  test('complete persists the draft and flips completed on success', () async {
+    walkToLastStep();
     expect(state().step, OnboardingStep.healthPermission);
-    controller().complete();
+
+    await controller().complete();
+
+    expect(profileApi.calls, 1);
+    expect(profileApi.saved!.goals, {FitnessGoal.loseWeight});
+    expect(profileApi.saved!.daysPerWeek, 3);
+    expect(profileApi.saved!.injuries, ['left knee']);
     expect(state().completed, isTrue);
+    expect(state().saving, isFalse);
+    expect(state().saveError, isNull);
+  });
+
+  test('complete records an error and stays incomplete on a failed save',
+      () async {
+    container = makeContainer(
+      saveError: const ApiException(500, 'Server exploded'),
+    );
+    walkToLastStep();
+
+    await controller().complete();
+
+    expect(state().completed, isFalse);
+    expect(state().saving, isFalse);
+    expect(state().saveError, 'Server exploded');
+
+    // Retry succeeds once the backend recovers — but the fake still throws, so
+    // assert only that a second attempt is made (the error is re-surfaced).
+    await controller().complete();
+    expect(profileApi.calls, 2);
+  });
+
+  test('complete is a no-op when the flow is unsatisfied', () async {
+    // Still on the goals step with nothing selected.
+    await controller().complete();
+    expect(profileApi.calls, 0);
+    expect(state().completed, isFalse);
   });
 
   test('health permission is optional and starts unrequested', () {

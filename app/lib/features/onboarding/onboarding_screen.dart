@@ -20,14 +20,16 @@ import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 /// to the controller, which drives the platform prompt through
 /// [healthPermissionServiceProvider].
 ///
-/// Persisting the draft (Profile API) and routing to Home on completion land in
-/// later M3 tasks; this screen drives the answers and flips
-/// [OnboardingState.completed] when the user finishes.
+/// Finishing persists the answers to the Profile API via
+/// [OnboardingController.complete] (which flips [OnboardingState.completed] on
+/// success, or surfaces an inline error to retry); routing to Home on
+/// completion lands in the next M3 task.
 class OnboardingScreen extends ConsumerWidget {
   const OnboardingScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     final state = ref.watch(onboardingControllerProvider);
     final controller = ref.read(onboardingControllerProvider.notifier);
     // Watching the full state above already rebuilds on every change, so reading
@@ -65,12 +67,30 @@ class OnboardingScreen extends ConsumerWidget {
             ),
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
-              child: PrimaryButton(
-                key: const Key('onboarding-next'),
-                label: state.isLastStep ? 'Finish' : 'Continue',
-                onPressed: canAdvance
-                    ? (state.isLastStep ? controller.complete : controller.next)
-                    : null,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (state.saveError case final error?) ...[
+                    Text(
+                      key: const Key('onboarding-save-error'),
+                      error,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: theme.colorScheme.error),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
+                  PrimaryButton(
+                    key: const Key('onboarding-next'),
+                    label: state.isLastStep ? 'Finish' : 'Continue',
+                    isLoading: state.saving,
+                    onPressed: canAdvance && !state.saving
+                        ? (state.isLastStep
+                            ? () => unawaited(controller.complete())
+                            : controller.next)
+                        : null,
+                  ),
+                ],
               ),
             ),
           ],

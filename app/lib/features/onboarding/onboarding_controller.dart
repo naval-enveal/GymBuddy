@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/health/health_permission_service.dart';
+import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
+import 'package:gymbuddy/features/onboarding/profile_api.dart';
 
 /// Valid ranges for body-stat inputs, mirrored from the Profile model's schema
 /// bounds (`server/src/models/profile.model.js`) so the client rejects what the
@@ -123,6 +125,8 @@ class OnboardingState {
     this.draft = const OnboardingDraft(),
     this.completed = false,
     this.requestingHealth = false,
+    this.saving = false,
+    this.saveError,
   });
 
   /// Index into [OnboardingStep.values] for the visible step.
@@ -131,13 +135,22 @@ class OnboardingState {
   /// Answers collected so far.
   final OnboardingDraft draft;
 
-  /// True once the user finishes the last step. Persisting the [draft] and
-  /// routing onward are wired in later M3 tasks; this flag marks the handoff.
+  /// True once the user finishes the last step AND the draft has been persisted
+  /// via the Profile API. Routing onward (to Home) is wired in the next M3 task;
+  /// this flag marks the handoff.
   final bool completed;
 
   /// True while the health-permission prompt is in flight, so the step's
   /// "Connect" button shows a spinner and can't be re-fired.
   final bool requestingHealth;
+
+  /// True while [OnboardingController.complete] is persisting the draft, so the
+  /// "Finish" button shows a spinner and can't be re-fired.
+  final bool saving;
+
+  /// A server- or network-authored message if the last save attempt failed;
+  /// null otherwise. The user can retry by tapping "Finish" again.
+  final String? saveError;
 
   OnboardingStep get step => OnboardingStep.values[stepIndex];
 
@@ -155,12 +168,17 @@ class OnboardingState {
     OnboardingDraft? draft,
     bool? completed,
     bool? requestingHealth,
+    bool? saving,
+    String? saveError,
+    bool clearSaveError = false,
   }) =>
       OnboardingState(
         stepIndex: stepIndex ?? this.stepIndex,
         draft: draft ?? this.draft,
         completed: completed ?? this.completed,
         requestingHealth: requestingHealth ?? this.requestingHealth,
+        saving: saving ?? this.saving,
+        saveError: clearSaveError ? null : (saveError ?? this.saveError),
       );
 }
 
@@ -293,11 +311,29 @@ class OnboardingController extends Notifier<OnboardingState> {
     state = state.copyWith(stepIndex: state.stepIndex - 1);
   }
 
-  /// Marks the flow finished. Persisting the draft and routing onward land in
-  /// later M3 tasks.
-  void complete() {
-    if (!canAdvance) return;
-    state = state.copyWith(completed: true);
+  /// Finishes the flow: persists the gathered answers to the Profile API, then
+  /// flips [OnboardingState.completed] (the handoff point for the routing task
+  /// that follows). On a failed save it records [OnboardingState.saveError] and
+  /// leaves the flow on the last step so the user can retry; the
+  /// device-level health-permission grant is intentionally not persisted (see
+  /// [ProfileApi]). No-op if the last step isn't satisfied or a save is already
+  /// in flight.
+  Future<void> complete() async {
+    if (!canAdvance || state.saving) return;
+    state = state.copyWith(saving: true, clearSaveError: true);
+    try {
+      await ref.read(profileApiProvider).saveOnboarding(state.draft);
+    } on ApiException catch (e) {
+      state = state.copyWith(saving: false, saveError: e.message);
+      return;
+    } catch (_) {
+      state = state.copyWith(
+        saving: false,
+        saveError: 'Something went wrong. Please try again.',
+      );
+      return;
+    }
+    state = state.copyWith(saving: false, completed: true);
   }
 }
 

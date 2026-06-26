@@ -32,13 +32,24 @@ through `core/health/health_permission_service.dart`
 override that provider; the resulting `HealthPermissionStatus` lands on the
 draft (kept client-side, not part of the Profile payload).
 
-**Next task: answers persisted via the Profile API** (`POST`/`PUT` profile,
-mapping `OnboardingDraft` → the Profile model's
-`goals/experience/daysPerWeek/equipment/injuries/bodyStats` wire shape —
-`OnboardingController.complete()` already flips `OnboardingState.completed` as
-the handoff point), then routing to Home on completion (no router yet —
-`OnboardingScreen` does not navigate on `completed`; wire that with the routing
-task, likely via the `AuthGate`).
+**Next task: route to Home on completion.** Persistence is now wired:
+`OnboardingController.complete()` is async — it maps the `OnboardingDraft` to
+the Profile wire shape and `PUT`s it through `profileApiProvider`
+(`features/onboarding/profile_api.dart`, `ProfileApi.saveOnboarding`) to the new
+backend `PUT /profile`, then flips `OnboardingState.completed` only on success
+(a failed save sets `OnboardingState.saveError` and leaves the user on the last
+step to retry; `OnboardingState.saving` drives the Finish spinner). The
+device-level `healthPermission` is intentionally NOT sent. What's left is
+navigation: there is still no router — `OnboardingScreen` does not navigate when
+`completed` flips, and nothing yet decides onboarding-vs-Home at launch. Wire
+that with the routing task, likely via the `AuthGate` (which today only branches
+signed-in/out): after auth, fetch the profile (`GET /profile`) and route to
+onboarding when `profile == null` or `onboardingComplete == false`, else the
+shell; have `OnboardingScreen` trigger that transition on `completed`. The
+backend Profile API is in place — `server/src/{routes,controllers,services,
+validators}/profile.*` (`GET`/`PUT /profile`, both `requireAuth`; the bespoke
+`validateProfile` middleware mirrors the model bounds and drops unknown keys),
+mounted at `/profile` in `app.js`.
 
 Auth is now fully wired end to end: the signed-out landing
 (`features/auth/signed_out_screen.dart`) routes into `features/auth/auth_screen.dart`
@@ -88,7 +99,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M3 — Onboarding  `[ ]`
 - [x] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
 - [x] Health-data permission request step
-- [ ] Answers persisted via Profile API
+- [x] Answers persisted via Profile API
 - [ ] Routes to Home on completion
 
 ### M4 — Workout plans (general / free)  `[ ]`
@@ -145,6 +156,37 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M3 · Onboarding answers persist via the Profile API. New backend
+  Profile endpoints (`GET`/`PUT /profile`, both behind `requireAuth`):
+  `routes/profile.routes.js` → `controllers/profile.controller.js` →
+  `services/profile.service.js` (`getProfile`/`upsertProfile`, a
+  `findOneAndUpdate` upsert keyed on `user` so a save is idempotent — one
+  profile per user, created lazily on first save), mounted at `/profile` in
+  `app.js`. The generic string/email `validate` middleware can't express a
+  profile (enum arrays, nested body-stats, numeric ranges), so a dedicated
+  `validators/profile.validators.js` (`validateProfile`) rejects the first
+  violation with a 400 `ApiError` and rebuilds `req.body` from only the declared
+  fields — dropping unknown keys so a client can't smuggle `isPremium` or the
+  device-level `healthPermission` into the upsert. Every field is optional (a
+  partial mid-onboarding save is valid) but any present field must be in-bounds
+  (bounds mirror `profile.model.js`). Client: new
+  `features/onboarding/profile_api.dart` (`ProfileApi.saveOnboarding`,
+  `profileApiProvider`) maps the `OnboardingDraft` to the wire shape (each answer
+  enum sent as its `wire` value, `onboardingComplete: true`; the health grant is
+  excluded). `OnboardingController.complete()` is now async: it sets
+  `OnboardingState.saving`, `PUT`s through the provider, and flips
+  `completed` only on success — on an `ApiException`/error it records
+  `OnboardingState.saveError` and stays on the last step so the user can retry.
+  `OnboardingScreen` drives the Finish spinner off `saving` and shows the
+  `onboarding-save-error` line. 9 new server tests (`tests/profile.test.js`:
+  auth required, null-before-onboarding, full upsert + read-back, idempotent
+  re-save, unknown-field stripping, invalid-goal/out-of-range-day/-bodystat
+  rejection, partial save, per-user isolation) and updated client tests (3
+  controller: persist-on-success, error-stays-incomplete, no-op-when-unsatisfied,
+  all over a fake `ProfileApi`; 1 new widget: failed save surfaces the inline
+  error; the full-walk + denial widget tests now override `profileApiProvider`).
+  `npm run lint` clean, `npm test` 76/76; `flutter analyze` clean, `flutter test`
+  75/75.
 - 2026-06-26 · M3 · Health-data permission request step added as the closing
   (7th) onboarding step. New `core/health/health_permission_service.dart`
   abstracts the platform health-permission prompt behind a
