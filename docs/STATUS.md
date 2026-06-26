@@ -14,29 +14,31 @@
 ---
 
 ## Next up
-**M2 · Flutter foundation + design system + shell** → next task: login / signup
-screens wired to the M1 endpoints. The networking layer now exists:
-`core/storage/token_store.dart` (`SecureTokenStore` over `flutter_secure_storage`
-+ an `InMemoryTokenStore` for tests, behind `tokenStoreProvider`),
-`core/network/api_client.dart` (`ApiClient` with Bearer-header injection + a
-single-flight refresh-on-401 interceptor, `apiClientProvider`), and
-`features/auth/auth_api.dart` (`AuthApi.login/register/logout` →
-`AuthSession`). `AuthController` is wired: `build()` restores the session from
-the token store at launch (resolving the gate's `AuthStatus.unknown` splash),
-`signIn`/`register` exchange credentials via `AuthApi` and persist the issued
-pair, and `signOut` clears tokens + best-effort revokes server-side. The
-signed-out landing's "Get started" still calls the transitional
-`AuthController.signInForPreview` (no credentials, no persistence) — the next
-task replaces it with real login/signup forms calling `signIn`/`register`,
-surfacing `ApiException.message`. The design system lives in `core/design/` and
-feature UI is built from its barrel (`package:gymbuddy/core/design/design.dart`).
+**M2 is complete** — all four tasks are checked. A PR from `m2-flutter-shell`
+into `dev` ("Milestone M2: Flutter foundation + design system + shell") is open
+for human review; do not merge or cut the next branch. After it merges, the next
+run cuts a fresh branch from `dev` and starts **M3 · Onboarding** (first task:
+the 5–7 step flow — goals, experience, days/week, equipment, injuries, body
+stats).
+
+Auth is now fully wired end to end: the signed-out landing
+(`features/auth/signed_out_screen.dart`) routes into `features/auth/auth_screen.dart`
+(a single login/signup form, mode toggled in place), whose submission logic
+lives in `features/auth/auth_form_controller.dart`
+(`authFormControllerProvider`, `autoDispose`) — it calls
+`AuthController.signIn`/`register`, surfaces `ApiException.message`, and on
+success lets the gate swap in the shell while the screen pops itself. Field
+validation (email format, 8+ char password on register) is client-side; the
+network layer (`token_store.dart`, `api_client.dart` with the single-flight
+refresh-on-401 interceptor, `auth_api.dart`) is unchanged. The design system
+lives in `core/design/` (barrel `package:gymbuddy/core/design/design.dart`).
 (Note: the Flutter SDK is present at `/opt/flutter/bin` but not on `PATH` —
-prepend it before running `flutter analyze`/`test`. Riverpod is 3.x: legacy
-`StateProvider` lives behind `flutter_riverpod/legacy.dart` — prefer a
-`Notifier`; `NotifierProvider.overrideWith` takes a zero-arg factory and a
-notifier must not touch `state` before its `build()` runs. Dev API base URL
-defaults to `http://10.0.2.2:4000` — the Android-emulator alias for the host's
-dev server on port 4000; override `apiBaseUrlProvider` per environment.)
+prepend it before running `flutter analyze`/`test`. Riverpod is 3.x: a notifier
+extends `Notifier<T>` and `autoDispose` is set on the provider
+(`NotifierProvider.autoDispose<C, T>`); a notifier must not touch `state` before
+its `build()` runs. Dev API base URL defaults to `http://10.0.2.2:4000` — the
+Android-emulator alias for the host's dev server on port 4000; override
+`apiBaseUrlProvider` per environment.)
 
 ---
 
@@ -62,7 +64,7 @@ dev server on port 4000; override `apiBaseUrlProvider` per environment.)
 - [x] Design system in `core/design/` (theme, tokens, reusable widgets)
 - [x] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
 - [x] API client with secure token storage + refresh interceptor
-- [ ] Login / signup screens wired to M1 endpoints
+- [x] Login / signup screens wired to M1 endpoints
 
 ### M3 — Onboarding  `[ ]`
 - [ ] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
@@ -124,6 +126,33 @@ dev server on port 4000; override `apiBaseUrlProvider` per environment.)
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M2 · Login / signup screens wired to the M1 `/auth/*` endpoints,
+  completing M2. New `features/auth/auth_screen.dart` is one form serving both
+  modes (toggled in place via an `auth-toggle` button) so the user can switch
+  between logging in and creating an account without losing context: an email
+  field, a password field, and — in register mode only — an optional name field.
+  Submission logic stays out of the widget per the no-logic-in-widgets rule: the
+  new `features/auth/auth_form_controller.dart` (`authFormControllerProvider`, an
+  `autoDispose` `Notifier<AuthFormState>`) owns the network exchange. Its
+  `submit({mode, email, password, displayName})` calls
+  `AuthController.signIn`/`register`, returns `true` on success (leaving
+  `submitting` true so the button can't re-fire before the gate tears the screen
+  down) and on an `ApiException` captures `message` into `AuthFormState.errorMessage`
+  and returns `false`; a second submit while one is in flight is ignored, and
+  `clearError()` wipes a stale error on mode-toggle. The screen runs client-side
+  validation (email format; 8+ char password on register, matching the server's
+  register rule; login only requires non-empty) before any network call, shows
+  the server error inline (`auth-error`), and on success pops itself so the gate
+  (now authenticated) reveals the shell. `SignedOutScreen` now routes into the
+  auth screen — "Get started" → register mode, "I already have an account" →
+  sign-in mode — replacing the transitional `signInForPreview`, which is deleted
+  from `AuthController`. 10 new tests (`auth_form_controller_test.dart` 5:
+  register/login success, error surfacing, clearError, single-flight;
+  `auth_screen_test.dart` 4: empty-field block skips the network, short-password
+  rejection, mode toggle shows/hides the name field, backend-error surfacing);
+  `auth_gate_test.dart` rewritten to drive the real form (mocked `ApiClient`)
+  through landing → form → shell → sign out. `flutter analyze` clean, `flutter
+  test` 53/53 green.
 - 2026-06-26 · M2 · API client + secure token storage + refresh interceptor, and
   `AuthController` wired to the M1 `/auth/*` endpoints. New `core/storage/token_store.dart`:
   `AuthTokens` (value type) behind a `TokenStore` interface with `SecureTokenStore`

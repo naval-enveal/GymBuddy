@@ -3,19 +3,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/app_info.dart';
 import 'package:gymbuddy/core/design/design.dart';
-import 'package:gymbuddy/features/auth/auth_controller.dart';
+import 'package:gymbuddy/features/auth/auth_form_controller.dart';
+import 'package:gymbuddy/features/auth/auth_screen.dart';
 
-/// The app's first screen when no session exists: GymBuddy branding plus a
-/// single call to action into the app.
+/// The app's first screen when no session exists: GymBuddy branding plus the
+/// entry points into the auth flow.
 ///
-/// This is the transitional signed-out landing. The dedicated login / signup
-/// screens wired to the M1 endpoints land in the next M2 task and will replace
-/// the [PrimaryButton] action here; for now it calls
-/// [AuthController.signInForPreview] so the auth gate can be exercised
-/// end-to-end. Branding (name + tagline) is read from [appInfoProvider] rather
-/// than hardcoded.
+/// "Get started" opens the [AuthScreen] in register mode; "I already have an
+/// account" opens it in sign-in mode. The screen itself owns the credential
+/// exchange (via [authFormControllerProvider]); this landing only routes into
+/// it. Branding (name + tagline) is read from [appInfoProvider] rather than
+/// hardcoded.
 class SignedOutScreen extends ConsumerWidget {
   const SignedOutScreen({super.key});
+
+  void _openAuth(BuildContext context, AuthFormMode mode) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AuthScreen(initialMode: mode),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -46,9 +54,12 @@ class SignedOutScreen extends ConsumerWidget {
               const Spacer(),
               PrimaryButton(
                 label: 'Get started',
-                onPressed: () => ref
-                    .read(authControllerProvider.notifier)
-                    .signInForPreview(),
+                onPressed: () => _openAuth(context, AuthFormMode.register),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              TextButton(
+                onPressed: () => _openAuth(context, AuthFormMode.signIn),
+                child: const Text('I already have an account'),
               ),
             ],
           ),

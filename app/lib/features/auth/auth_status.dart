@@ -11,6 +11,7 @@ enum AuthStatus {
   /// A valid session exists. The `AuthGate` shows the app shell.
   authenticated,
 
-  /// No session. The `AuthGate` shows the signed-out flow (login lands next).
+  /// No session. The `AuthGate` shows the signed-out flow (landing + login /
+  /// signup screens).
   unauthenticated,
 }

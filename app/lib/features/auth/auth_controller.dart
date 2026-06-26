@@ -19,8 +19,8 @@ import 'package:gymbuddy/features/auth/auth_status.dart';
 /// [AuthStatus.unauthenticated].
 ///
 /// Credential exchange ([signIn]/[register]) goes through [AuthApi] and persists
-/// the issued tokens; the login/signup screens that call these land in the next
-/// M2 task.
+/// the issued tokens; the login/signup screens drive these via the
+/// `AuthFormController`.
 class AuthController extends Notifier<AuthStatus> {
   @override
   AuthStatus build() {
@@ -80,12 +80,6 @@ class AuthController extends Notifier<AuthStatus> {
       }
     }
   }
-
-  /// Transitional: flips to authenticated with no credentials so the signed-out
-  /// landing can exercise the gate before the login/signup screens land (the
-  /// next M2 task, which replaces this with [signIn]/[register]). No tokens are
-  /// persisted, so a preview session does not survive a restart.
-  void signInForPreview() => state = AuthStatus.authenticated;
 
   Future<void> _persist(AuthSession session) async {
     await ref.read(tokenStoreProvider).save(session.tokens);
