@@ -14,11 +14,13 @@
 ---
 
 ## Next up
-**M2 · Flutter foundation + design system + shell** → next task: Design system
-in `core/design/` (theme, tokens, reusable widgets). M1 is fully complete; a PR
-into `dev` is open and awaits human review/merge before M2 begins. (Note: the
-Flutter SDK is absent in this build env — prior M0 entries confirm Dart tasks
-can't be analyzed/tested here, so M2 may require a human-run analyze.)
+**M2 · Flutter foundation + design system + shell** → next task: App shell +
+bottom nav (Home, Plans, Workout, Profile) behind an auth gate. M1 is merged
+into `dev` (PR #1). The design system now lives in `core/design/` and feature
+UI should be built from its barrel (`package:gymbuddy/core/design/design.dart`).
+(Note: the Flutter SDK is present at `/opt/flutter/bin` but not on `PATH` —
+prepend it before running `flutter analyze`/`test`. The earlier "SDK absent"
+note was wrong; analyze + test run green here.)
 
 ---
 
@@ -41,7 +43,7 @@ can't be analyzed/tested here, so M2 may require a human-run analyze.)
 - [x] Passing integration tests for the auth flow
 
 ### M2 — Flutter foundation + design system + shell  `[ ]`
-- [ ] Design system in `core/design/` (theme, tokens, reusable widgets)
+- [x] Design system in `core/design/` (theme, tokens, reusable widgets)
 - [ ] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
 - [ ] API client with secure token storage + refresh interceptor
 - [ ] Login / signup screens wired to M1 endpoints
@@ -106,6 +108,27 @@ can't be analyzed/tested here, so M2 may require a human-run analyze.)
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M2 · Design system landed in `app/lib/core/design/`, the
+  foundation all feature UI builds on (imported via the barrel
+  `core/design/design.dart`). Tokens centralize the visual language: `AppColors`
+  (dark-first near-black surface ramp + the single energetic accent `0xFF00E5A0`
+  with an `onAccent` near-black for legible text over it), `AppSpacing` (8pt
+  grid + `minTouchTarget` 48), `AppRadii`, `AppDurations`, and `AppTypography`
+  — whose numeric styles use `FontFeature.tabularFigures` so in-workout counters
+  and timers don't jitter as digit widths change. `AppTheme.dark` overrides
+  Material 3 heavily (near-black scaffold, flat un-elevated cards, pill primary
+  buttons sized to the 48dp target, accent-focused inputs). Five reusable
+  widgets, all purely presentational (logic stays in providers per the
+  no-logic-in-widgets rule): `PrimaryButton` (full-width pill CTA with disabled +
+  loading states, where loading uses an accent spinner that stays visible
+  against the disabled surface), `MetricTile` (labelled dashboard metric),
+  `StatRing` (CustomPainter ring sweeping from 12 o'clock, progress clamped to
+  [0,1]), `RepCounter` (huge glanceable rep numeral + optional target), and
+  `RestTimer` (depleting ring + m:ss readout, guards zero/negative inputs, turns
+  warning-colored under 10s). `main.dart` now uses `AppTheme.dark`. 19 widget +
+  theme tests (`test/core/design/`) covering callbacks, tap-gating while loading,
+  value formatting, and out-of-range clamping. `flutter analyze` clean, `flutter
+  test` 19/19 green. (Flutter 3.44.4 lives at `/opt/flutter/bin`, not on PATH.)
 - 2026-06-26 · M1 · End-to-end auth-flow integration tests
   (`tests/auth.flow.test.js`), completing M1. Where `auth.test.js` exercises
   each endpoint in isolation and `auth.middleware.test.js` mounts `requireAuth`

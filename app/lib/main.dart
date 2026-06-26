@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/app_info.dart';
+import 'package:gymbuddy/core/design/design.dart';
 
 void main() {
   // ProviderScope is the root of Riverpod's state graph; every provider read in
@@ -23,13 +24,7 @@ class GymBuddyApp extends StatelessWidget {
     return MaterialApp(
       title: 'GymBuddy',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00E5A0),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.dark,
       home: const BootScreen(),
     );
   }
