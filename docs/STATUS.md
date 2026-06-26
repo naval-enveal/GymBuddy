@@ -14,10 +14,10 @@
 ---
 
 ## Next up
-**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: Auth middleware
-that verifies the `Authorization: Bearer <access>` header, loads the user, and
-rejects missing/invalid/expired tokens with the shared error shape. Builds on the
-`verifyAccessToken` helper in `token.service`.
+**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: Request
+validation + shared error response shape — validate request bodies at the edge
+(register/login/refresh/logout) and centralize the `{ error: { message } }`
+shape, replacing the ad-hoc guards currently in `auth.controller`.
 
 ---
 
@@ -35,7 +35,7 @@ rejects missing/invalid/expired tokens with the shared error shape. Builds on th
 ### M1 — Backend foundation + auth  [GATE CLEARED]  `[ ]`
 - [x] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
 - [x] JWT auth: register, login, refresh, logout (bcrypt)
-- [ ] Auth middleware
+- [x] Auth middleware
 - [ ] Request validation + shared error response shape
 - [ ] Passing integration tests for the auth flow
 
@@ -105,6 +105,17 @@ rejects missing/invalid/expired tokens with the shared error shape. Builds on th
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M1 · Auth middleware added (`src/middleware/auth.middleware.js`).
+  `requireAuth` parses the `Authorization: Bearer <access>` header, verifies it
+  via `token.service.verifyAccessToken`, loads the owning user, and attaches
+  `req.user` + `req.userId` for downstream handlers. Every failure path —
+  missing header, non-Bearer scheme, malformed/invalid/expired token, a refresh
+  token presented as an access token (caught by the `type` check), or a valid
+  token whose user no longer exists — returns `401` with the shared
+  `{ error: { message } }` shape; non-JWT errors propagate to `next(err)`.
+  7 new integration tests via `mongodb-memory-server` against a tiny app that
+  mounts the middleware on a protected route. `npm run lint` clean,
+  `npm test` 47/47 green.
 - 2026-06-26 · M1 · JWT auth flow shipped: `POST /auth/{register,login,refresh,logout}`.
   `token.service` signs/verifies access (15m) + refresh (30d) JWTs under separate
   secrets with a `type` claim, so neither can be replayed as the other; refresh
