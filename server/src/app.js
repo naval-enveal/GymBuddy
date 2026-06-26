@@ -3,6 +3,7 @@
 const express = require('express');
 const healthRoutes = require('./routes/health.routes');
 const authRoutes = require('./routes/auth.routes');
+const profileRoutes = require('./routes/profile.routes');
 const { errorHandler } = require('./middleware/error.middleware');
 
 /**
@@ -18,6 +19,7 @@ function createApp() {
 
   app.use('/health', healthRoutes);
   app.use('/auth', authRoutes);
+  app.use('/profile', profileRoutes);
 
   // 404 fallback.
   app.use((req, res) => {

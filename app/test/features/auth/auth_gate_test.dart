@@ -11,6 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/core/storage/token_store.dart';
+import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
+import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 import 'package:gymbuddy/main.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -19,6 +21,10 @@ String _sessionJson() => jsonEncode({
       'user': {'id': 'u1', 'email': 'a@b.com'},
       'accessToken': 'AT',
       'refreshToken': 'RT',
+    });
+
+String _profileJson({required bool onboardingComplete}) => jsonEncode({
+      'profile': {'onboardingComplete': onboardingComplete},
     });
 
 /// Boots the app with an empty (in-memory) token store, so launch-time session
@@ -48,6 +54,44 @@ Future<void> _pumpApp(
   );
   // Let the restore splash resolve before driving the gate.
   await tester.pumpAndSettle();
+}
+
+/// Boots the app already authenticated (token store seeded), so the gate lands
+/// straight on the post-auth onboarding router. Returns the container so a test
+/// can drive providers directly. [handler] backs the API client (the gate's
+/// `GET /profile` check, plus any save).
+Future<ProviderContainer> _pumpAuthed(
+  WidgetTester tester, {
+  required MockClientHandler handler,
+}) async {
+  final store = InMemoryTokenStore(
+    const AuthTokens(accessToken: 'AT', refreshToken: 'RT'),
+  );
+  final container = ProviderContainer(
+    // Disable Riverpod 3's automatic retry of errored providers so the gate's
+    // error/retry path is deterministic under test (production keeps auto-retry
+    // on top of the manual retry button).
+    retry: (_, _) => null,
+    overrides: [
+      tokenStoreProvider.overrideWithValue(store),
+      apiClientProvider.overrideWithValue(
+        ApiClient(
+          baseUrl: 'http://test',
+          tokenStore: store,
+          httpClient: MockClient(handler),
+        ),
+      ),
+    ],
+  );
+  addTearDown(container.dispose);
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: const GymBuddyApp(),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return container;
 }
 
 /// Drives the signed-out landing → auth screen → submitted credentials, leaving
@@ -87,7 +131,13 @@ void main() {
       (WidgetTester tester) async {
     await _pumpApp(
       tester,
-      handler: (req) async => http.Response(_sessionJson(), 201),
+      // Onboarding already done, so the gate routes past it to the shell.
+      handler: (req) async {
+        if (req.url.path == '/profile') {
+          return http.Response(_profileJson(onboardingComplete: true), 200);
+        }
+        return http.Response(_sessionJson(), 201);
+      },
     );
 
     await _signIn(tester);
@@ -108,6 +158,9 @@ void main() {
       tester,
       handler: (req) async {
         if (req.url.path == '/auth/logout') return http.Response('', 204);
+        if (req.url.path == '/profile') {
+          return http.Response(_profileJson(onboardingComplete: true), 200);
+        }
         return http.Response(_sessionJson(), 201);
       },
     );
@@ -129,5 +182,81 @@ void main() {
 
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('Get started'), findsOneWidget);
+  });
+
+  testWidgets('authenticated but onboarding-incomplete lands on the flow',
+      (WidgetTester tester) async {
+    await _pumpAuthed(
+      tester,
+      handler: (req) async {
+        if (req.url.path == '/profile') {
+          return http.Response(_profileJson(onboardingComplete: false), 200);
+        }
+        return http.Response('', 404);
+      },
+    );
+
+    // The onboarding flow, not the shell, is shown.
+    expect(find.text('What are your goals?'), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+  });
+
+  testWidgets('finishing onboarding routes on to the shell',
+      (WidgetTester tester) async {
+    final container = await _pumpAuthed(
+      tester,
+      handler: (req) async {
+        if (req.url.path == '/profile') {
+          // GET (gate check) → not yet done; PUT (save) → done.
+          return http.Response(
+            _profileJson(onboardingComplete: req.method == 'PUT'),
+            200,
+          );
+        }
+        return http.Response('', 404);
+      },
+    );
+
+    // Starts in the flow.
+    expect(find.byType(NavigationBar), findsNothing);
+
+    // Fill a valid draft and finish via the controller; on success the screen
+    // flips the gate and the AuthGate routes to the shell.
+    container.read(onboardingControllerProvider.notifier)
+      ..toggleGoal(FitnessGoal.buildMuscle)
+      ..setExperience(ExperienceLevel.beginner)
+      ..setDaysPerWeek(3)
+      ..toggleEquipment(Equipment.bodyweight);
+    await container.read(onboardingControllerProvider.notifier).complete();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.text('Home'), findsWidgets);
+  });
+
+  testWidgets('a failed onboarding-status check shows a retry that recovers',
+      (WidgetTester tester) async {
+    var attempts = 0;
+    await _pumpAuthed(
+      tester,
+      handler: (req) async {
+        if (req.url.path == '/profile') {
+          attempts++;
+          if (attempts == 1) return http.Response('', 500);
+          return http.Response(_profileJson(onboardingComplete: true), 200);
+        }
+        return http.Response('', 404);
+      },
+    );
+
+    // The first check failed: a retry is offered instead of guessing.
+    expect(find.byKey(const Key('onboarding-gate-retry')), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+
+    await tester.tap(find.byKey(const Key('onboarding-gate-retry')));
+    await tester.pumpAndSettle();
+
+    // The retry refetched (onboarding complete) → the shell.
+    expect(find.byType(NavigationBar), findsOneWidget);
   });
 }
