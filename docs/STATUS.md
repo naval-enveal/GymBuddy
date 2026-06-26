@@ -31,7 +31,7 @@ gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
 - [x] CI runs analyze + server tests on push
 - [x] `app/` and `server/` CLAUDE.md files created
 
-### M1 — Backend foundation + auth  [HUMAN GATE]  `[ ]`
+### M1 — Backend foundation + auth  [GATE CLEARED]  `[ ]`
 - [ ] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
 - [ ] JWT auth: register, login, refresh, logout (bcrypt)
 - [ ] Auth middleware
