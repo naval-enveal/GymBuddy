@@ -15,28 +15,34 @@
 
 ## Next up
 **M4 · Workout plans** is active on branch `m4-plans` (cut from `dev` after M3
-merged via PR #3). The template library is now seeded; the next unchecked task
-is **"Endpoint returns templates matched to profile"** — a `GET /plans/templates`
-(or similar) route, `requireAuth`, that reads the caller's Profile and ranks the
-seeded templates by goal / experience / days / available equipment, returning
-the matched template Plans (populate `workouts`). Build it
-routes → controller → service over the existing models; keep the shared
-`{ error: { message } }` shape. After that come the Plans list/detail UI and
-select/persist-active-plan (the latter writes an owned, non-template Plan with
-`isActive`, enforced one-active-per-user server-side).
+merged via PR #3). The matching endpoint just landed; the next unchecked task is
+**"Plans list + detail UI"** — Flutter screens (the Plans tab in `AppShell` is
+still a `ComingSoon` placeholder) that fetch `GET /plans/templates` and render
+the ranked library as a list, each tappable through to a detail view showing the
+plan's training days and their exercises (use the `formTracked` flag to mark
+form-tracked vs rep-tracked-only exercises). Keep logic out of widgets per the
+Riverpod / no-logic-in-widgets rule: add a `PlanApi` + a provider/notifier that
+calls the endpoint through `apiClientProvider`, mirroring
+`features/onboarding/profile_api.dart`. After that comes
+select/persist-active-plan (writes an owned, non-template Plan with `isActive`,
+enforced one-active-per-user server-side).
 
-The seed just landed: `src/seeds/templates.js` is the pure data (six template
-plans spanning all five goals, a range of experience/equipment/days), consumed
-by `services/seed.service.js` (`seedTemplates()` — idempotent: it
-`deleteMany`s existing `isTemplate` plans + `owner:null` workouts, then
-recreates from the data file, so a re-run lands an exact state and never touches
-user-authored workouts or adopted plans). Runnable via `npm run seed`
-(`src/seeds/run.js`). Template Plans are `isTemplate:true, owner:null`; their
-training-day Workouts are `owner:null`. `formTracked` is set true only for
-mirror/POV-visible movements (squats, lunges, hinges, curls) per the
-first-person-POV constraint. Tests: `tests/seed.test.js` (7) cover counts,
-template/owner flags, enum validity, full-goal coverage, populated workouts,
-idempotency, and that user-owned data survives a re-seed.
+The matching endpoint: `GET /plans/templates`, `requireAuth`, mounted at
+`/plans` in `app.js`. `routes/plan.routes.js` → `controllers/plan.controller.js`
+→ `services/plan.service.js`. `getMatchedTemplates(userId)` reads the caller's
+Profile + all `isTemplate` Plans (populates `workouts`), scores each via
+`scoreTemplate(plan, profile)`, and returns them best-match-first (ties break on
+name) as `{ templates: [ { ...plan, matchScore } ] }`. Scoring weights: goal
+match +100 (profile.goals is a list, any hit counts), equipment feasibility +40
+if fully runnable else −15 per missing piece (`expandEquipment` treats
+bodyweight/none as always-available and `full_gym` as a superset of all kit),
+experience `max(0, 20 − gap*10)`, daysPerWeek `max(0, 15 − gap*5)`. No profile
+(not yet onboarded) → full library, name order, score 0. The wire shape is the
+populated Plan JSON plus a `matchScore` field — the UI can show ranking and the
+training days directly. 7 tests (`tests/plans.test.js`): auth required, full
+library w/ populated workouts, no-profile name-order, goal-match-first,
+equipment penalty (bodyweight user vs full-gym plan), full-gym perfect match
+(score 175), and that adopted user plans never leak in.
 
 ---
 
@@ -126,7 +132,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M4 — Workout plans (general / free)  `[ ]`
 - [x] Template library seeded in backend
-- [ ] Endpoint returns templates matched to profile
+- [x] Endpoint returns templates matched to profile
 - [ ] Plans list + detail UI
 - [ ] Select / persist active plan
 
@@ -178,6 +184,29 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M4 · `GET /plans/templates` returns the seeded template library
+  ranked against the caller's onboarding Profile. New
+  `routes/plan.routes.js` → `controllers/plan.controller.js` →
+  `services/plan.service.js`, mounted at `/plans` in `app.js`, behind
+  `requireAuth` and reusing the shared `{ error: { message } }` shape.
+  `getMatchedTemplates(userId)` loads the Profile and all `isTemplate` Plans
+  (populating `workouts`), scores each template, and returns them best-first
+  (ties break on name) as `{ templates: [ { ...plan, matchScore } ] }`.
+  `scoreTemplate` weights goal match +100 (profile.goals is a list — any hit
+  counts), equipment feasibility +40 when fully runnable else −15 per missing
+  piece (a helper `expandEquipment` treats `bodyweight`/`none` as always
+  available and `full_gym` as a superset of every individual piece, so a
+  fully-kitted user isn't docked against a barbell-only plan and bodyweight
+  plans stay runnable for everyone), experience `max(0, 20 − gap*10)` over the
+  level index, and daysPerWeek `max(0, 15 − gap*5)`. A user with no profile yet
+  (hasn't onboarded) can't be ranked, so the full library comes back in name
+  order with score 0. 7 new tests (`tests/plans.test.js`): auth required, full
+  library with populated training-day workouts, no-profile name-order/zero
+  score, goal-matched template first, equipment penalty (bodyweight-only user
+  ranks the bodyweight plan above the full-gym split), a full-gym intermediate
+  build-muscle user hitting the perfect 175 match, and confirmation that adopted
+  (owned, non-template) plans never leak into the library. `npm run lint` clean,
+  `npm test` 90/90 green.
 - 2026-06-26 · M4 · Template library seeded in the backend, starting M4. New pure
   data module `server/src/seeds/templates.js` defines six general/free template
   plans deliberately spanning all five goals (`general_fitness`, `gain_strength`
