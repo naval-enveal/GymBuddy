@@ -14,14 +14,14 @@
 ---
 
 ## Next up
-**M0 · Scaffold & tooling** → first unchecked task below.
+**M0 · Scaffold & tooling** → Flutter app boots on a device/simulator.
 
 ---
 
 ## Milestones
 
 ### M0 — Scaffold & tooling  `[ ]`
-- [ ] Monorepo initialized (`app/`, `server/`, `docs/`, `.claude/`)
+- [x] Monorepo initialized (`app/`, `server/`, `docs/`, `.claude/`)
 - [ ] Flutter app boots on a device/simulator
 - [ ] Express + Mongoose server boots with a health-check endpoint
 - [ ] Riverpod wired into the app
@@ -102,4 +102,4 @@
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
-- (nothing yet)
+- 2026-06-26 · M0 · Monorepo initialized: app/, server/, docs/, .claude/ skeleton per PLAN, plus root .gitignore and README.
