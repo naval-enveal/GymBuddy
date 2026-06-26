@@ -14,20 +14,22 @@
 ---
 
 ## Next up
-**M0 · Scaffold & tooling** → `app/` and `server/` CLAUDE.md files created.
+**M1 · Backend foundation + auth** `[HUMAN GATE]` → first task: Mongoose models
+(User, Profile, Plan, Workout, WorkoutLog, Subscription). M0 is complete. M1 is
+gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
 
 ---
 
 ## Milestones
 
-### M0 — Scaffold & tooling  `[ ]`
+### M0 — Scaffold & tooling  `[x]`
 - [x] Monorepo initialized (`app/`, `server/`, `docs/`, `.claude/`)
 - [x] Flutter app boots on a device/simulator
 - [x] Express + Mongoose server boots with a health-check endpoint
 - [x] Riverpod wired into the app
 - [x] Lint + `flutter analyze` configured, both clean
 - [x] CI runs analyze + server tests on push
-- [ ] `app/` and `server/` CLAUDE.md files created
+- [x] `app/` and `server/` CLAUDE.md files created
 
 ### M1 — Backend foundation + auth  [HUMAN GATE]  `[ ]`
 - [ ] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
@@ -102,6 +104,7 @@
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M0 · Area `CLAUDE.md` files added for `app/` and `server/`, completing M0. Each complements the root file rather than duplicating it: `app/CLAUDE.md` covers the `lib/` layout, Riverpod/no-logic-in-widgets rule, package imports, strict-lint expectations, the dark-first theme tokens, and the `WorkoutSensorSource`/mock hardware rule; `server/CLAUDE.md` covers the side-effect-free `app.js` vs `server.js` split, the routes→controllers→services→models layering, env-only secrets, the shared `{ error: { message } }` shape, and server-side premium gating. Server `npm run lint` + `npm test` green (2/2); docs-only change, no Dart touched (Flutter SDK absent in this env, as in prior M0 entries).
 - 2026-06-26 · M0 · CI added (`.github/workflows/ci.yml`), runs on push + pull_request. Two parallel jobs: **app** (Flutter stable via subosito/flutter-action → `flutter pub get` + `flutter analyze` + `flutter test`) and **server** (Node 18 with npm cache → `npm ci` + `npm run lint` + `npm test`). YAML validated; server lint + tests run green locally (2/2). Flutter job not runnable in this env (no SDK installed) — verified config syntax instead.
 - 2026-06-26 · M0 · Lint + analyze configured and clean on both ends. Flutter `analysis_options.yaml` hardened beyond the template: strict-casts/inference/raw-types, `missing_required_param`/`dead_code` as errors, build/generated files excluded, plus curated lints (single quotes, trailing commas, const-correctness, package imports, `avoid_print`, `unawaited_futures`). Fixed the surfaced issues (`main.dart` package import, alphabetized pubspec deps). Server keeps its `eslint:recommended` config. `flutter analyze` → no issues, `flutter test` 2/2 green, `npm run lint` clean.
 - 2026-06-26 · M0 · Riverpod wired into the app: `ProviderScope` at the root in `main.dart`, first provider `appInfoProvider` in `core/app_info.dart`, `BootScreen` reads it as a `ConsumerWidget`; widget tests verify boot + provider override. `flutter analyze` clean, `flutter test` green (2/2).
