@@ -14,14 +14,36 @@
 ---
 
 ## Next up
-**M3 · Onboarding is complete** on branch `m3-onboarding` (cut from `dev` after
-M2 merged); a PR into `dev` ("Milestone M3: onboarding") is open and awaiting a
-human review + merge. Do not start M4 until that lands — the next run cuts a
-fresh `m4-plans` branch from `dev` after the merge.
+**M4 · Workout plans** is active on branch `m4-plans` (cut from `dev` after M3
+merged via PR #3). The template library is now seeded; the next unchecked task
+is **"Endpoint returns templates matched to profile"** — a `GET /plans/templates`
+(or similar) route, `requireAuth`, that reads the caller's Profile and ranks the
+seeded templates by goal / experience / days / available equipment, returning
+the matched template Plans (populate `workouts`). Build it
+routes → controller → service over the existing models; keep the shared
+`{ error: { message } }` shape. After that come the Plans list/detail UI and
+select/persist-active-plan (the latter writes an owned, non-template Plan with
+`isActive`, enforced one-active-per-user server-side).
 
-Routing is now wired through the gate. `AuthGate`
+The seed just landed: `src/seeds/templates.js` is the pure data (six template
+plans spanning all five goals, a range of experience/equipment/days), consumed
+by `services/seed.service.js` (`seedTemplates()` — idempotent: it
+`deleteMany`s existing `isTemplate` plans + `owner:null` workouts, then
+recreates from the data file, so a re-run lands an exact state and never touches
+user-authored workouts or adopted plans). Runnable via `npm run seed`
+(`src/seeds/run.js`). Template Plans are `isTemplate:true, owner:null`; their
+training-day Workouts are `owner:null`. `formTracked` is set true only for
+mirror/POV-visible movements (squats, lunges, hinges, curls) per the
+first-person-POV constraint. Tests: `tests/seed.test.js` (7) cover counts,
+template/owner flags, enum validity, full-goal coverage, populated workouts,
+idempotency, and that user-owned data survives a re-seed.
+
+---
+
+### M3 — Onboarding (shipped, merged to `dev`)
+Routing is wired through the gate. `AuthGate`
 (`features/auth/auth_gate.dart`) still branches signed-in/out, but the
-authenticated branch now renders `_OnboardingRouter`, which watches
+authenticated branch renders `_OnboardingRouter`, which watches
 `onboardingGateProvider` (`features/onboarding/onboarding_gate.dart`,
 `OnboardingGateController extends AsyncNotifier<bool>`). The gate's `build()`
 reads `ProfileApi.fetchOnboardingComplete()` (`GET /profile`, response
@@ -37,7 +59,7 @@ providers with backoff, so the gate's manual retry sits on top of that; the gate
 widget tests disable auto-retry (`ProviderContainer(retry: (_, _) => null)`) to
 keep the error path deterministic.
 
-The rest of the onboarding flow is unchanged: seven steps in
+The rest of the onboarding flow: seven steps in
 `features/onboarding/onboarding_screen.dart` (`OnboardingScreen`,
 `ConsumerWidget`) driven by `onboardingControllerProvider`
 (`OnboardingController`/`OnboardingState`/`OnboardingDraft` in
@@ -103,7 +125,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Routes to Home on completion
 
 ### M4 — Workout plans (general / free)  `[ ]`
-- [ ] Template library seeded in backend
+- [x] Template library seeded in backend
 - [ ] Endpoint returns templates matched to profile
 - [ ] Plans list + detail UI
 - [ ] Select / persist active plan
@@ -156,6 +178,27 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M4 · Template library seeded in the backend, starting M4. New pure
+  data module `server/src/seeds/templates.js` defines six general/free template
+  plans deliberately spanning all five goals (`general_fitness`, `gain_strength`
+  ×2, `build_muscle`, `lose_weight`, `improve_endurance`) and a range of
+  experience levels, equipment (bodyweight → full gym), and 2–6 training days,
+  each with embedded exercises whose `formTracked` flag is set true only for
+  mirror/POV-visible movements (squats, lunges, hinges, curls) per the
+  first-person-POV constraint. New `services/seed.service.js` (`seedTemplates()`)
+  writes them via the real Plan/Workout models and is idempotent: it
+  `deleteMany`s existing `isTemplate` plans and `owner:null` template workouts,
+  then recreates from the data file, so a re-run lands an exact end state with no
+  duplicates and never touches user-authored workouts (real `owner`) or adopted
+  plans (`isTemplate:false`). Runnable via `npm run seed` (`src/seeds/run.js`,
+  connects → seeds → disconnects). Template Plans are `isTemplate:true,
+  owner:null`; training-day Workouts are `owner:null`, leaving the matching
+  endpoint (next task) a clean library to rank against a Profile. 7 new tests
+  (`tests/seed.test.js`): per-definition plan + workout counts, template/owner
+  flags, enum validity against `models/constants.js`, full-goal coverage,
+  plan→workout population with non-empty exercises, idempotency (re-seed → equal
+  result, unique names), and user-owned data surviving a re-seed. `npm run lint`
+  clean, `npm test` 83/83 green.
 - 2026-06-26 · M3 · Onboarding routes to Home on completion, finishing M3. The
   `AuthGate`'s authenticated branch no longer renders the shell directly; it now
   renders `_OnboardingRouter` (`features/auth/auth_gate.dart`), which watches the
