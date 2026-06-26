@@ -14,9 +14,10 @@
 ---
 
 ## Next up
-**M1 · Backend foundation + auth** `[HUMAN GATE]` → first task: Mongoose models
-(User, Profile, Plan, Workout, WorkoutLog, Subscription). M0 is complete. M1 is
-gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
+**M1 · Backend foundation + auth** `[GATE CLEARED]` → next task: JWT auth
+(register, login, refresh, logout) with bcrypt. The six Mongoose models are done
+and unit-tested; auth services/controllers build on the `User` and
+`Subscription` models.
 
 ---
 
@@ -32,7 +33,7 @@ gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
 - [x] `app/` and `server/` CLAUDE.md files created
 
 ### M1 — Backend foundation + auth  [GATE CLEARED]  `[ ]`
-- [ ] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
+- [x] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
 - [ ] JWT auth: register, login, refresh, logout (bcrypt)
 - [ ] Auth middleware
 - [ ] Request validation + shared error response shape
@@ -104,6 +105,17 @@ gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M1 · Six Mongoose models added under `server/src/models/`: `User`
+  (email + bcrypt `passwordHash`, hash `select:false` and stripped from `toJSON`),
+  `Profile` (onboarding goals/experience/days/equipment/injuries/body stats, one
+  per user), `Workout` (training-day definition with embedded exercises carrying a
+  `formTracked` flag per the POV-glasses constraint), `Plan` (ordered Workout refs +
+  profile-match attrs, `isTemplate`/`isActive`/`owner`), `WorkoutLog` (performed
+  session with nested logged sets, `{user, startedAt:-1}` index), and `Subscription`
+  (premium entitlement with an `isPremiumActive()` method for server-side gating).
+  Shared enums centralized in `models/constants.js`; barrel export in `models/index.js`.
+  23 unit tests (validation + method behavior via `validateSync()`, no live Mongo
+  needed) — `npm run lint` clean, `npm test` 23/23 green.
 - 2026-06-26 · M0 · Area `CLAUDE.md` files added for `app/` and `server/`, completing M0. Each complements the root file rather than duplicating it: `app/CLAUDE.md` covers the `lib/` layout, Riverpod/no-logic-in-widgets rule, package imports, strict-lint expectations, the dark-first theme tokens, and the `WorkoutSensorSource`/mock hardware rule; `server/CLAUDE.md` covers the side-effect-free `app.js` vs `server.js` split, the routes→controllers→services→models layering, env-only secrets, the shared `{ error: { message } }` shape, and server-side premium gating. Server `npm run lint` + `npm test` green (2/2); docs-only change, no Dart touched (Flutter SDK absent in this env, as in prior M0 entries).
 - 2026-06-26 · M0 · CI added (`.github/workflows/ci.yml`), runs on push + pull_request. Two parallel jobs: **app** (Flutter stable via subosito/flutter-action → `flutter pub get` + `flutter analyze` + `flutter test`) and **server** (Node 18 with npm cache → `npm ci` + `npm run lint` + `npm test`). YAML validated; server lint + tests run green locally (2/2). Flutter job not runnable in this env (no SDK installed) — verified config syntax instead.
 - 2026-06-26 · M0 · Lint + analyze configured and clean on both ends. Flutter `analysis_options.yaml` hardened beyond the template: strict-casts/inference/raw-types, `missing_required_param`/`dead_code` as errors, build/generated files excluded, plus curated lints (single quotes, trailing commas, const-correctness, package imports, `avoid_print`, `unawaited_futures`). Fixed the surfaced issues (`main.dart` package import, alphabetized pubspec deps). Server keeps its `eslint:recommended` config. `flutter analyze` → no issues, `flutter test` 2/2 green, `npm run lint` clean.
