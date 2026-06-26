@@ -11,6 +11,8 @@ const app = createApp();
  * prevent the server from serving requests (the health-check reports state).
  */
 function start() {
+  config.assertProdSecrets();
+
   connectDb()
     .then(() => {
       // eslint-disable-next-line no-console

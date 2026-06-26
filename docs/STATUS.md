@@ -14,9 +14,11 @@
 ---
 
 ## Next up
-**M1 · Backend foundation + auth** `[HUMAN GATE]` → first task: Mongoose models
-(User, Profile, Plan, Workout, WorkoutLog, Subscription). M0 is complete. M1 is
-gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
+**M2 · Flutter foundation + design system + shell** → next task: Design system
+in `core/design/` (theme, tokens, reusable widgets). M1 is fully complete; a PR
+into `dev` is open and awaits human review/merge before M2 begins. (Note: the
+Flutter SDK is absent in this build env — prior M0 entries confirm Dart tasks
+can't be analyzed/tested here, so M2 may require a human-run analyze.)
 
 ---
 
@@ -31,12 +33,12 @@ gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
 - [x] CI runs analyze + server tests on push
 - [x] `app/` and `server/` CLAUDE.md files created
 
-### M1 — Backend foundation + auth  [HUMAN GATE]  `[ ]`
-- [ ] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
-- [ ] JWT auth: register, login, refresh, logout (bcrypt)
-- [ ] Auth middleware
-- [ ] Request validation + shared error response shape
-- [ ] Passing integration tests for the auth flow
+### M1 — Backend foundation + auth  [GATE CLEARED]  `[x]`
+- [x] Mongoose models: User, Profile, Plan, Workout, WorkoutLog, Subscription
+- [x] JWT auth: register, login, refresh, logout (bcrypt)
+- [x] Auth middleware
+- [x] Request validation + shared error response shape
+- [x] Passing integration tests for the auth flow
 
 ### M2 — Flutter foundation + design system + shell  `[ ]`
 - [ ] Design system in `core/design/` (theme, tokens, reusable widgets)
@@ -104,6 +106,74 @@ gated — a human must change its tag to `[GATE CLEARED]` before work proceeds.
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M1 · End-to-end auth-flow integration tests
+  (`tests/auth.flow.test.js`), completing M1. Where `auth.test.js` exercises
+  each endpoint in isolation and `auth.middleware.test.js` mounts `requireAuth`
+  against synthetic tokens, this walks one user through the *connected*
+  lifecycle against an in-memory MongoDB: register → use the issued access
+  token on a real protected `/me` route → refresh (rotation) → use the rotated
+  access token → logout → confirm the refresh token is revoked and reuse 401s.
+  Proves tokens minted by the real `/auth/*` endpoints authenticate through the
+  real middleware stack, that a refresh token is rejected as a Bearer access
+  token (type mismatch), and that a missing token yields the shared
+  `{ error: { message } }` 401. It also pins the designed contract that an
+  access token stays valid until expiry after logout (logout revokes only the
+  refresh side). 5 new tests; `npm run lint` clean, `npm test` 65/65 green.
+- 2026-06-26 · M1 · Request validation + a centralized shared error shape. New
+  generic `validate(schema)` middleware (`src/middleware/validate.middleware.js`)
+  checks/sanitizes `req.body` at the edge and, on the first violation, forwards a
+  400 `ApiError` with a clear message; on success it replaces `req.body` with
+  only the declared fields (unknown keys dropped, so a client can't smuggle
+  extra props into a `create`). Per-route schemas in
+  `src/validators/auth.validators.js`: register enforces email format + an 8–200
+  char password + ≤80 char displayName; login only requires a non-empty password
+  (≤200) so a too-short attempt still gets the same non-enumerating 401, not a
+  400; refresh/logout require `refreshToken`. Emails are trimmed + lowercased;
+  passwords/tokens are left byte-for-byte intact. New `errorHandler`
+  (`src/middleware/error.middleware.js`, mounted last in `app.js`) is now the
+  single owner of the `{ error: { message } }` shape — maps `ApiError`/`AuthError`
+  (any 4xx `statusCode`), dup-key 11000 → 409, Mongoose `ValidationError` → 400,
+  malformed JSON → 400, and everything else → opaque logged 500. `asyncHandler`
+  wraps the controllers so the ad-hoc `fail`/`handleServiceError`/`try-catch`
+  guards are gone — handlers now trust validated input and let errors propagate.
+  13 new Mongo-free validation tests (`tests/auth.validation.test.js`).
+  `npm run lint` clean, `npm test` 60/60 green.
+- 2026-06-26 · M1 · Auth middleware added (`src/middleware/auth.middleware.js`).
+  `requireAuth` parses the `Authorization: Bearer <access>` header, verifies it
+  via `token.service.verifyAccessToken`, loads the owning user, and attaches
+  `req.user` + `req.userId` for downstream handlers. Every failure path —
+  missing header, non-Bearer scheme, malformed/invalid/expired token, a refresh
+  token presented as an access token (caught by the `type` check), or a valid
+  token whose user no longer exists — returns `401` with the shared
+  `{ error: { message } }` shape; non-JWT errors propagate to `next(err)`.
+  7 new integration tests via `mongodb-memory-server` against a tiny app that
+  mounts the middleware on a protected route. `npm run lint` clean,
+  `npm test` 47/47 green.
+- 2026-06-26 · M1 · JWT auth flow shipped: `POST /auth/{register,login,refresh,logout}`.
+  `token.service` signs/verifies access (15m) + refresh (30d) JWTs under separate
+  secrets with a `type` claim, so neither can be replayed as the other; refresh
+  tokens carry a unique `jti`. `auth.service` hashes passwords with bcrypt
+  (`BCRYPT_ROUNDS`, default 12), creates the default free `Subscription` on
+  register, and uses a new `RefreshToken` model (stores only the `jti` + TTL index,
+  never the token string) for server-side rotation/revocation — refresh atomically
+  consumes the old `jti` and issues a fresh pair, so replaying a rotated/revoked
+  token 401s; logout is idempotent. Login uses one non-enumerating 401 for both
+  unknown email and bad password. Controllers map `AuthError`/dup-key/validation
+  onto the shared `{ error: { message } }` shape; `passwordHash` is never returned.
+  Env gains JWT/bcrypt settings with dev fallbacks + `assertProdSecrets()` boot
+  guard; `.env.example` updated. 17 new tests (6 token unit + 11 full-flow
+  integration via `mongodb-memory-server`). `npm run lint` clean, `npm test` 40/40 green.
+- 2026-06-26 · M1 · Six Mongoose models added under `server/src/models/`: `User`
+  (email + bcrypt `passwordHash`, hash `select:false` and stripped from `toJSON`),
+  `Profile` (onboarding goals/experience/days/equipment/injuries/body stats, one
+  per user), `Workout` (training-day definition with embedded exercises carrying a
+  `formTracked` flag per the POV-glasses constraint), `Plan` (ordered Workout refs +
+  profile-match attrs, `isTemplate`/`isActive`/`owner`), `WorkoutLog` (performed
+  session with nested logged sets, `{user, startedAt:-1}` index), and `Subscription`
+  (premium entitlement with an `isPremiumActive()` method for server-side gating).
+  Shared enums centralized in `models/constants.js`; barrel export in `models/index.js`.
+  23 unit tests (validation + method behavior via `validateSync()`, no live Mongo
+  needed) — `npm run lint` clean, `npm test` 23/23 green.
 - 2026-06-26 · M0 · Area `CLAUDE.md` files added for `app/` and `server/`, completing M0. Each complements the root file rather than duplicating it: `app/CLAUDE.md` covers the `lib/` layout, Riverpod/no-logic-in-widgets rule, package imports, strict-lint expectations, the dark-first theme tokens, and the `WorkoutSensorSource`/mock hardware rule; `server/CLAUDE.md` covers the side-effect-free `app.js` vs `server.js` split, the routes→controllers→services→models layering, env-only secrets, the shared `{ error: { message } }` shape, and server-side premium gating. Server `npm run lint` + `npm test` green (2/2); docs-only change, no Dart touched (Flutter SDK absent in this env, as in prior M0 entries).
 - 2026-06-26 · M0 · CI added (`.github/workflows/ci.yml`), runs on push + pull_request. Two parallel jobs: **app** (Flutter stable via subosito/flutter-action → `flutter pub get` + `flutter analyze` + `flutter test`) and **server** (Node 18 with npm cache → `npm ci` + `npm run lint` + `npm test`). YAML validated; server lint + tests run green locally (2/2). Flutter job not runnable in this env (no SDK installed) — verified config syntax instead.
 - 2026-06-26 · M0 · Lint + analyze configured and clean on both ends. Flutter `analysis_options.yaml` hardened beyond the template: strict-casts/inference/raw-types, `missing_required_param`/`dead_code` as errors, build/generated files excluded, plus curated lints (single quotes, trailing commas, const-correctness, package imports, `avoid_print`, `unawaited_futures`). Fixed the surfaced issues (`main.dart` package import, alphabetized pubspec deps). Server keeps its `eslint:recommended` config. `flutter analyze` → no issues, `flutter test` 2/2 green, `npm run lint` clean.
