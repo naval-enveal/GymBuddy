@@ -14,14 +14,68 @@
 ---
 
 ## Next up
-**M3 · Onboarding is complete** on branch `m3-onboarding` (cut from `dev` after
-M2 merged); a PR into `dev` ("Milestone M3: onboarding") is open and awaiting a
-human review + merge. Do not start M4 until that lands — the next run cuts a
-fresh `m4-plans` branch from `dev` after the merge.
+**M4 · Workout plans is complete** — all four tasks are checked on branch
+`m4-plans`. The final task (Select / persist active plan) just shipped: the
+backend gained `POST /plans/:id/adopt` (writes an owned, active copy of a
+template and its workouts, deactivating any prior active plan — one active plan
+per user, enforced server-side) and `GET /plans/active`, and the Plans detail
+screen gained a "Use this plan" action surfacing which plan is active. **Open a
+PR from `m4-plans` into `dev` titled "Milestone M4: Workout plans" and stop** —
+a human reviews and merges. The next run cuts `m5-vitals` from `dev` and starts
+**M5 · Vitals dashboard** (first task: integrate the `health` package for
+HealthKit + Health Connect).
 
-Routing is now wired through the gate. `AuthGate`
+Adoption design notes for whoever picks up M5/customization: the adopted plan is
+a *deep copy* (its own owned Workouts), not a reference to the template's
+`owner:null` workouts — so a library re-seed (which `deleteMany`s template
+workouts) can't dangle a user's active plan. Each adopted Plan carries a new
+`sourceTemplate` ref (the template it came from); the app matches the active
+owned plan back to its library card via that field (the owned copy has a
+different `_id`). Server: `adoptTemplate`/`getActivePlan` in
+`services/plan.service.js`, `adoptPlan`/`getActivePlan` controllers, routes in
+`plan.routes.js` (`/active` before `/:id/adopt`). Client: `PlanApi.adoptPlan` +
+`fetchActivePlan`, new `activePlanControllerProvider`
+(`features/plans/active_plan_controller.dart`, `AsyncNotifier<PlanTemplate?>` —
+`build()` loads the active plan, `adopt()` swaps in the owned copy), and the now
+`ConsumerWidget` `PlanDetailScreen` with an `_AdoptBar` bottom action.
+
+The Plans UI (this task, done): `features/plans/` — `plan_models.dart`
+(`PlanTemplate`/`PlanWorkout`/`PlanExercise`, defensive `fromJson` over the
+`GET /plans/templates` wire shape, wire-enum humanizing label getters),
+`plan_api.dart` (`PlanApi.fetchTemplates()` + `planApiProvider` over
+`apiClientProvider`, mirroring `profile_api.dart`), `plans_controller.dart`
+(`PlansController extends AsyncNotifier<List<PlanTemplate>>`, `build()` fetches,
+`refresh()` for pull-to-refresh + error retry), `plans_screen.dart` (replaces the
+`ComingSoon` placeholder — `AsyncValue.when` → spinner / retryable error / empty
+state / ranked `ListView`; top plan badged "Best match" when `matchScore > 0`;
+each card taps through to detail), and `plan_detail_screen.dart` (training days +
+per-exercise rows with a form-tracked vs reps-only badge keyed on the model's
+`formTracked`). No-logic-in-widgets respected: all I/O lives in the
+controller/API.
+
+The matching endpoint: `GET /plans/templates`, `requireAuth`, mounted at
+`/plans` in `app.js`. `routes/plan.routes.js` → `controllers/plan.controller.js`
+→ `services/plan.service.js`. `getMatchedTemplates(userId)` reads the caller's
+Profile + all `isTemplate` Plans (populates `workouts`), scores each via
+`scoreTemplate(plan, profile)`, and returns them best-match-first (ties break on
+name) as `{ templates: [ { ...plan, matchScore } ] }`. Scoring weights: goal
+match +100 (profile.goals is a list, any hit counts), equipment feasibility +40
+if fully runnable else −15 per missing piece (`expandEquipment` treats
+bodyweight/none as always-available and `full_gym` as a superset of all kit),
+experience `max(0, 20 − gap*10)`, daysPerWeek `max(0, 15 − gap*5)`. No profile
+(not yet onboarded) → full library, name order, score 0. The wire shape is the
+populated Plan JSON plus a `matchScore` field — the UI can show ranking and the
+training days directly. 7 tests (`tests/plans.test.js`): auth required, full
+library w/ populated workouts, no-profile name-order, goal-match-first,
+equipment penalty (bodyweight user vs full-gym plan), full-gym perfect match
+(score 175), and that adopted user plans never leak in.
+
+---
+
+### M3 — Onboarding (shipped, merged to `dev`)
+Routing is wired through the gate. `AuthGate`
 (`features/auth/auth_gate.dart`) still branches signed-in/out, but the
-authenticated branch now renders `_OnboardingRouter`, which watches
+authenticated branch renders `_OnboardingRouter`, which watches
 `onboardingGateProvider` (`features/onboarding/onboarding_gate.dart`,
 `OnboardingGateController extends AsyncNotifier<bool>`). The gate's `build()`
 reads `ProfileApi.fetchOnboardingComplete()` (`GET /profile`, response
@@ -37,7 +91,7 @@ providers with backoff, so the gate's manual retry sits on top of that; the gate
 widget tests disable auto-retry (`ProviderContainer(retry: (_, _) => null)`) to
 keep the error path deterministic.
 
-The rest of the onboarding flow is unchanged: seven steps in
+The rest of the onboarding flow: seven steps in
 `features/onboarding/onboarding_screen.dart` (`OnboardingScreen`,
 `ConsumerWidget`) driven by `onboardingControllerProvider`
 (`OnboardingController`/`OnboardingState`/`OnboardingDraft` in
@@ -102,11 +156,11 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Answers persisted via Profile API
 - [x] Routes to Home on completion
 
-### M4 — Workout plans (general / free)  `[ ]`
-- [ ] Template library seeded in backend
-- [ ] Endpoint returns templates matched to profile
-- [ ] Plans list + detail UI
-- [ ] Select / persist active plan
+### M4 — Workout plans (general / free)  `[x]`
+- [x] Template library seeded in backend
+- [x] Endpoint returns templates matched to profile
+- [x] Plans list + detail UI
+- [x] Select / persist active plan
 
 ### M5 — Vitals dashboard  `[ ]`
 - [ ] `health` package integrated (HealthKit + Health Connect)
@@ -156,6 +210,111 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M4 · Select / persist active plan — completes M4. Backend: two
+  new endpoints on the `/plans` router, both behind `requireAuth` and reusing
+  the shared `{ error: { message } }` shape. `POST /plans/:id/adopt`
+  (`adoptTemplate` in `services/plan.service.js`) adopts a library template as
+  the caller's active plan — it deep-copies the template's training-day Workouts
+  into new `owner`-set Workouts (so a library re-seed, which `deleteMany`s
+  `owner:null` template workouts, can't dangle a user's plan) and writes an
+  owned, non-template Plan with `isActive: true` and a new `sourceTemplate` ref
+  back to the template. It enforces **one active plan per user** server-side:
+  any prior active owned plan is flipped `isActive:false` in the same operation
+  (never trusted from the client). A non-template / unknown id 404s.
+  `GET /plans/active` (`getActivePlan`) returns the caller's active plan
+  (workouts populated) or `null`. New `sourceTemplate` field on the Plan model
+  (ref `Plan`, default null). Client: `PlanApi` gains `adoptPlan(templateId)` +
+  `fetchActivePlan()`; new `activePlanControllerProvider`
+  (`features/plans/active_plan_controller.dart`,
+  `ActivePlanController extends AsyncNotifier<PlanTemplate?>` — `build()` loads
+  the active plan, `adopt()` moves through loading and swaps the resolved owned
+  copy into state, capturing failure as `AsyncError`). `PlanTemplate` gains a
+  `sourceTemplate` field so the UI can match the owned active plan (different
+  `_id`) back to its library card. `PlanDetailScreen` is now a `ConsumerWidget`
+  with an `_AdoptBar` bottom action: a "Use this plan" `PrimaryButton`
+  (spinner while in flight, error → SnackBar) that becomes a "Your active plan"
+  indicator once this plan is active (matched via `sourceTemplate == plan.id`).
+  All I/O stays in the controller/API per no-logic-in-widgets. 9 new server
+  tests (`tests/plans.adopt.test.js`: auth on both endpoints, null-when-none,
+  owned/active/own-workouts copy, active read-back, second-adopt deactivates the
+  first (exactly one active), per-user isolation, non-template/unknown 404,
+  adopted plans never leak into the library) and 8 new client tests (4
+  `active_plan_controller_test.dart`: build loads / null, adopt swaps state,
+  failed adopt → error; 4 `plan_detail_screen_test.dart`: offers + adopts,
+  already-active surfaced, a different active plan isn't marked, adopt failure
+  shows the error and stays adoptable). The shell + plans-screen test fakes now
+  implement the two new `PlanApi` methods. `npm run lint` clean, `npm test`
+  99/99; `flutter analyze` clean, `flutter test` 96/96 green.
+- 2026-06-26 · M4 · Plans list + detail UI — the Plans tab now renders the
+  profile-ranked template library instead of a `ComingSoon` placeholder. New
+  `features/plans/`: `plan_models.dart` decodes the `GET /plans/templates` wire
+  shape (`PlanTemplate`/`PlanWorkout`/`PlanExercise`) with defensive `fromJson`
+  (missing/wrong-typed fields fall back, never throw) and humanized label
+  getters for the snake_case wire enums; `plan_api.dart`
+  (`PlanApi.fetchTemplates()` + `planApiProvider` over `apiClientProvider`,
+  mirroring `profile_api.dart`); `plans_controller.dart` (`PlansController
+  extends AsyncNotifier<List<PlanTemplate>>` — `build()` fetches once, `refresh()`
+  re-fetches for pull-to-refresh and the error-state retry). `plans_screen.dart`
+  renders the resulting `AsyncValue` via `.when` — a spinner, a retryable error
+  state, an empty state, or the ranked `ListView` (best-match-first from the
+  server; the top plan is badged "Best match for you" only when `matchScore > 0`,
+  i.e. the user has onboarded). Each card taps through to `plan_detail_screen.dart`,
+  which lists the plan's training days and, per exercise, a sets×reps + rest line
+  and a form-tracked vs reps-only badge keyed on the model's `formTracked` flag
+  (the glasses are first-person POV, so form correction is per-exercise). All I/O
+  stays in the controller/API per the no-logic-in-widgets rule; the widgets only
+  render state and forward taps. 10 new tests: `plan_models_test.dart` (4 — full
+  parse, enum humanizing, formTracked/prescription incl. the no-reps "3 sets"
+  case, graceful defaults on a sparse payload) and `plans_screen_test.dart` (6 —
+  loading spinner, ranked list with the top-match badge, no badge when unranked,
+  tap-through to detail showing exercises + both tracking badges, empty state,
+  and error→retry→recovered with auto-retry disabled). The shell test now stubs
+  `planApiProvider` (the Plans tab builds eagerly in the `IndexedStack`).
+  `flutter analyze` clean, `flutter test` 88/88 green.
+- 2026-06-26 · M4 · `GET /plans/templates` returns the seeded template library
+  ranked against the caller's onboarding Profile. New
+  `routes/plan.routes.js` → `controllers/plan.controller.js` →
+  `services/plan.service.js`, mounted at `/plans` in `app.js`, behind
+  `requireAuth` and reusing the shared `{ error: { message } }` shape.
+  `getMatchedTemplates(userId)` loads the Profile and all `isTemplate` Plans
+  (populating `workouts`), scores each template, and returns them best-first
+  (ties break on name) as `{ templates: [ { ...plan, matchScore } ] }`.
+  `scoreTemplate` weights goal match +100 (profile.goals is a list — any hit
+  counts), equipment feasibility +40 when fully runnable else −15 per missing
+  piece (a helper `expandEquipment` treats `bodyweight`/`none` as always
+  available and `full_gym` as a superset of every individual piece, so a
+  fully-kitted user isn't docked against a barbell-only plan and bodyweight
+  plans stay runnable for everyone), experience `max(0, 20 − gap*10)` over the
+  level index, and daysPerWeek `max(0, 15 − gap*5)`. A user with no profile yet
+  (hasn't onboarded) can't be ranked, so the full library comes back in name
+  order with score 0. 7 new tests (`tests/plans.test.js`): auth required, full
+  library with populated training-day workouts, no-profile name-order/zero
+  score, goal-matched template first, equipment penalty (bodyweight-only user
+  ranks the bodyweight plan above the full-gym split), a full-gym intermediate
+  build-muscle user hitting the perfect 175 match, and confirmation that adopted
+  (owned, non-template) plans never leak into the library. `npm run lint` clean,
+  `npm test` 90/90 green.
+- 2026-06-26 · M4 · Template library seeded in the backend, starting M4. New pure
+  data module `server/src/seeds/templates.js` defines six general/free template
+  plans deliberately spanning all five goals (`general_fitness`, `gain_strength`
+  ×2, `build_muscle`, `lose_weight`, `improve_endurance`) and a range of
+  experience levels, equipment (bodyweight → full gym), and 2–6 training days,
+  each with embedded exercises whose `formTracked` flag is set true only for
+  mirror/POV-visible movements (squats, lunges, hinges, curls) per the
+  first-person-POV constraint. New `services/seed.service.js` (`seedTemplates()`)
+  writes them via the real Plan/Workout models and is idempotent: it
+  `deleteMany`s existing `isTemplate` plans and `owner:null` template workouts,
+  then recreates from the data file, so a re-run lands an exact end state with no
+  duplicates and never touches user-authored workouts (real `owner`) or adopted
+  plans (`isTemplate:false`). Runnable via `npm run seed` (`src/seeds/run.js`,
+  connects → seeds → disconnects). Template Plans are `isTemplate:true,
+  owner:null`; training-day Workouts are `owner:null`, leaving the matching
+  endpoint (next task) a clean library to rank against a Profile. 7 new tests
+  (`tests/seed.test.js`): per-definition plan + workout counts, template/owner
+  flags, enum validity against `models/constants.js`, full-goal coverage,
+  plan→workout population with non-empty exercises, idempotency (re-seed → equal
+  result, unique names), and user-owned data surviving a re-seed. `npm run lint`
+  clean, `npm test` 83/83 green.
 - 2026-06-26 · M3 · Onboarding routes to Home on completion, finishing M3. The
   `AuthGate`'s authenticated branch no longer renders the shell directly; it now
   renders `_OnboardingRouter` (`features/auth/auth_gate.dart`), which watches the

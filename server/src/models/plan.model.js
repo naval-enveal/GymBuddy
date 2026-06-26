@@ -1,7 +1,7 @@
 'use strict';
 
 const mongoose = require('mongoose');
-const { GOALS, EXPERIENCE_LEVELS } = require('./constants');
+const { GOALS, EXPERIENCE_LEVELS, EQUIPMENT } = require('./constants');
 
 /**
  * A workout plan: an ordered set of Workouts plus the profile attributes used
@@ -15,6 +15,9 @@ const planSchema = new mongoose.Schema(
     goal: { type: String, enum: GOALS },
     experience: { type: String, enum: EXPERIENCE_LEVELS },
     daysPerWeek: { type: Number, min: 1, max: 7 },
+    // Equipment a trainee needs to run this plan, used to match templates to a
+    // profile's available equipment (M4). Empty means no special equipment.
+    equipment: { type: [{ type: String, enum: EQUIPMENT }], default: [] },
     // Ordered list of training days for the week.
     workouts: [
       {
@@ -29,7 +32,17 @@ const planSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
-    // True for the single plan the owner is currently training against.
+    // For a plan adopted from the library, the template it was copied from.
+    // Lets the app mark which template is currently active. Null for templates
+    // themselves and any ad-hoc plan.
+    sourceTemplate: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Plan',
+      default: null,
+    },
+    // True for the single plan the owner is currently training against. One
+    // active plan per user is enforced in the service, never trusted from the
+    // client.
     isActive: { type: Boolean, default: false },
   },
   { timestamps: true }

@@ -10,6 +10,8 @@ import 'package:gymbuddy/features/auth/auth_controller.dart';
 import 'package:gymbuddy/features/auth/auth_gate.dart';
 import 'package:gymbuddy/features/auth/auth_status.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_gate.dart';
+import 'package:gymbuddy/features/plans/plan_api.dart';
+import 'package:gymbuddy/features/plans/plan_models.dart';
 import 'package:gymbuddy/features/shell/app_shell.dart';
 
 /// An [AuthController] that boots already authenticated, so the gate renders
@@ -17,6 +19,20 @@ import 'package:gymbuddy/features/shell/app_shell.dart';
 class _AuthedController extends AuthController {
   @override
   AuthStatus build() => AuthStatus.authenticated;
+}
+
+/// A [PlanApi] returning an empty library, so the Plans tab (built eagerly in
+/// the shell's IndexedStack) doesn't reach for the real network.
+class _StubPlanApi implements PlanApi {
+  @override
+  Future<List<PlanTemplate>> fetchTemplates() async => const [];
+
+  @override
+  Future<PlanTemplate?> fetchActivePlan() async => null;
+
+  @override
+  Future<PlanTemplate> adoptPlan(String templateId) =>
+      throw UnimplementedError();
 }
 
 /// An onboarding gate that reports onboarding already complete, so the auth gate
@@ -31,6 +47,7 @@ ProviderContainer _authenticatedContainer() {
     overrides: [
       authControllerProvider.overrideWith(_AuthedController.new),
       onboardingGateProvider.overrideWith(_OnboardedGate.new),
+      planApiProvider.overrideWithValue(_StubPlanApi()),
     ],
   );
 }
