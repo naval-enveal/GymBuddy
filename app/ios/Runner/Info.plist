@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>GymBuddy reads your resting heart rate, HRV, sleep, and steps to show your daily readiness and tailor your training.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>GymBuddy can record completed workouts to Apple Health.</string>
 </dict>
 </plist>

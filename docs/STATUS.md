@@ -14,17 +14,46 @@
 ---
 
 ## Next up
-**M4 · Workout plans is complete** — all four tasks are checked on branch
-`m4-plans`. The final task (Select / persist active plan) just shipped: the
-backend gained `POST /plans/:id/adopt` (writes an owned, active copy of a
-template and its workouts, deactivating any prior active plan — one active plan
-per user, enforced server-side) and `GET /plans/active`, and the Plans detail
-screen gained a "Use this plan" action surfacing which plan is active. **Open a
-PR from `m4-plans` into `dev` titled "Milestone M4: Workout plans" and stop** —
-a human reviews and merges. The next run cuts `m5-vitals` from `dev` and starts
-**M5 · Vitals dashboard** (first task: integrate the `health` package for
-HealthKit + Health Connect).
+**M5 · Vitals dashboard is underway** on branch `m5-vitals` (cut from `dev`
+after PR #4 merged M4). The first task just shipped: the `health` package
+(v13) is integrated for HealthKit + Health Connect. The next unchecked task is
+**Permission handling with graceful denied state** — build the vitals feature's
+permission UI/state on top of the now-real `healthPermissionServiceProvider`,
+surfacing `granted` / `denied` / `unavailable` (the M5 reads must keep working
+— empty/locked states — when the user declines or no health store is present).
 
+Integration design notes (this task, done): the real service lives behind the
+existing `HealthPermissionService` interface in `app/lib/core/health/`. New
+`health_data_types.dart` exposes `vitalsHealthTypes()` — the platform-aware set
+of `HealthDataType`s the dashboard reads (resting HR, HRV, sleep, steps); HRV
+differs by platform (HealthKit `SDNN` vs Health Connect `RMSSD`), so resolve it
+per `Platform.isAndroid`. Reuse this same list for the M5 data reads so the
+permission request and the reads ask for exactly the same types.
+`health_package_permission_service.dart` adds `HealthPackagePermissionService`
+(real `HealthPermissionService`) over a thin injectable `HealthClient` seam
+(`LiveHealthClient` wraps the package's `Health()`; the seam exists so the
+service is unit-testable without the platform method channel, which is absent
+under `flutter test`). `request()` → `configure()` → `isHealthConnectAvailable()`
+(false ⇒ `unavailable`) → `requestAuthorization(READ)` (granted ⇒ `granted`,
+else `denied`); any thrown platform error degrades to `unavailable` rather than
+crashing — the same mock-first/graceful posture as the sensor layer. The mock
+stays the **provider default** (tests + hardware-free dev); `main.dart`
+(composition root) overrides `healthPermissionServiceProvider` to the real
+service, exactly like the `sessionExpiredProvider` override. Native config:
+Android manifest gained the four Health Connect READ permissions (resting HR,
+HRV, sleep, steps) + `ACTIVITY_RECOGNITION` (steps), the `healthdata` package
+query, and the `ACTION_SHOW_PERMISSIONS_RATIONALE` intent-filter; `MainActivity`
+now extends `FlutterFragmentActivity` (Health Connect needs a FragmentActivity
+host); `minSdk` bumped to `maxOf(26, flutter.minSdkVersion)` (Health Connect
+floor). iOS got the two HealthKit `Info.plist` usage strings and a
+`Runner.entitlements` (HealthKit) wired via `CODE_SIGN_ENTITLEMENTS` in all
+three Runner build configs. Note: the iOS HealthKit capability + Health Connect
+on-device behavior can't be compiled/verified in this headless env — the Dart
+gate (`flutter analyze` + `flutter test`) is what's green here.
+
+---
+
+### M4 — Workout plans (shipped, merged to `dev` via PR #4)
 Adoption design notes for whoever picks up M5/customization: the adopted plan is
 a *deep copy* (its own owned Workouts), not a reference to the template's
 `owner:null` workouts — so a library re-seed (which `deleteMany`s template
@@ -163,7 +192,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Select / persist active plan
 
 ### M5 — Vitals dashboard  `[ ]`
-- [ ] `health` package integrated (HealthKit + Health Connect)
+- [x] `health` package integrated (HealthKit + Health Connect)
 - [ ] Permission handling with graceful denied state
 - [ ] Reads resting HR, HRV, sleep, steps, readiness proxy
 - [ ] Home renders StatRings + sparklines, with empty states
@@ -210,6 +239,41 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M5 · `health` package integrated (HealthKit + Health Connect),
+  starting M5 on branch `m5-vitals`. Added `health: ^13.0.0` (resolves to
+  13.3.1). The real platform integration lives behind the existing
+  `HealthPermissionService` interface in `app/lib/core/health/` (feature code
+  never touches HealthKit / Health Connect directly, same rule as the sensor
+  layer). New `health_data_types.dart` defines `vitalsHealthTypes()` — the
+  platform-aware set of `HealthDataType`s the M5 dashboard reads (resting HR,
+  HRV, sleep, steps); HRV is `SDNN` on HealthKit vs `RMSSD` on Health Connect,
+  resolved per `Platform.isAndroid`, so the permission request and the later
+  reads ask for the same types. New `health_package_permission_service.dart`
+  adds `HealthPackagePermissionService` over a thin injectable `HealthClient`
+  seam (`LiveHealthClient` wraps the package's `Health()`); the seam keeps the
+  service unit-testable without the platform method channel (absent under
+  `flutter test`). `request()` configures the plugin, returns `unavailable`
+  when no store is reachable (`isHealthConnectAvailable()` false), else requests
+  READ authorization for the vitals types and maps the result to
+  `granted` / `denied`; any thrown platform error degrades to `unavailable`
+  rather than crashing the flow (mock-first / graceful-degradation posture). The
+  `MockHealthPermissionService` stays the **provider default** so tests and
+  hardware-free dev builds are untouched; `main.dart` (composition root)
+  overrides `healthPermissionServiceProvider` to the real service, mirroring the
+  existing `sessionExpiredProvider` override. Native config: Android manifest
+  gained the four Health Connect READ permissions + `ACTIVITY_RECOGNITION`, the
+  `com.google.android.apps.healthdata` package query and
+  `ACTION_SHOW_PERMISSIONS_RATIONALE` intent-filter; `MainActivity` now extends
+  `FlutterFragmentActivity` (required by the Health Connect permission flow);
+  `minSdk` is `maxOf(26, flutter.minSdkVersion)` (Health Connect floor). iOS got
+  the two HealthKit `Info.plist` usage strings and a `Runner.entitlements`
+  (HealthKit) wired via `CODE_SIGN_ENTITLEMENTS` across all three Runner build
+  configs. 5 new tests (`test/core/health/health_package_permission_service_test.dart`:
+  granted, denied, unavailable-skips-prompt, requests the vitals types, and a
+  throw at any stage degrades to unavailable). `flutter analyze` clean,
+  `flutter test` 101/101 green. (iOS HealthKit capability + on-device Health
+  Connect behavior can't be compiled in this headless env; the Dart analyze +
+  test gate is what's verified here.)
 - 2026-06-26 · M4 · Select / persist active plan — completes M4. Backend: two
   new endpoints on the `/plans` router, both behind `requireAuth` and reusing
   the shared `{ error: { message } }` shape. `POST /plans/:id/adopt`
