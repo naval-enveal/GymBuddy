@@ -9,6 +9,7 @@ import 'package:gymbuddy/core/design/design.dart';
 import 'package:gymbuddy/features/auth/auth_controller.dart';
 import 'package:gymbuddy/features/auth/auth_gate.dart';
 import 'package:gymbuddy/features/auth/auth_status.dart';
+import 'package:gymbuddy/features/onboarding/onboarding_gate.dart';
 import 'package:gymbuddy/features/shell/app_shell.dart';
 
 /// An [AuthController] that boots already authenticated, so the gate renders
@@ -18,10 +19,18 @@ class _AuthedController extends AuthController {
   AuthStatus build() => AuthStatus.authenticated;
 }
 
+/// An onboarding gate that reports onboarding already complete, so the auth gate
+/// routes straight to the shell without a profile round-trip.
+class _OnboardedGate extends OnboardingGateController {
+  @override
+  Future<bool> build() async => true;
+}
+
 ProviderContainer _authenticatedContainer() {
   return ProviderContainer(
     overrides: [
       authControllerProvider.overrideWith(_AuthedController.new),
+      onboardingGateProvider.overrideWith(_OnboardedGate.new),
     ],
   );
 }
@@ -38,6 +47,8 @@ void main() {
         child: MaterialApp(theme: AppTheme.dark, home: const AuthGate()),
       ),
     );
+    // Let the onboarding gate resolve (to onboarded) so the shell renders.
+    await tester.pumpAndSettle();
 
     expect(find.byType(AppShell), findsOneWidget);
     expect(find.byType(NavigationDestination), findsNWidgets(4));
@@ -55,6 +66,8 @@ void main() {
         child: MaterialApp(theme: AppTheme.dark, home: const AuthGate()),
       ),
     );
+    // Let the onboarding gate resolve (to onboarded) so the shell renders.
+    await tester.pumpAndSettle();
 
     await tester.tap(
       find.descendant(

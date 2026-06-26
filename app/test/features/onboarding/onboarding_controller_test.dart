@@ -40,6 +40,9 @@ class _FakeProfileApi implements ProfileApi {
     saved = draft;
     if (error != null) throw error!;
   }
+
+  @override
+  Future<bool> fetchOnboardingComplete() async => false;
 }
 
 void main() {

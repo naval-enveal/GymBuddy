@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gymbuddy/core/design/design.dart';
 import 'package:gymbuddy/core/health/health_permission_service.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_controller.dart';
+import 'package:gymbuddy/features/onboarding/onboarding_gate.dart';
 import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 
 /// The multi-step onboarding flow — goals, experience, days/week, equipment,
@@ -22,8 +23,9 @@ import 'package:gymbuddy/features/onboarding/onboarding_options.dart';
 ///
 /// Finishing persists the answers to the Profile API via
 /// [OnboardingController.complete] (which flips [OnboardingState.completed] on
-/// success, or surfaces an inline error to retry); routing to Home on
-/// completion lands in the next M3 task.
+/// success, or surfaces an inline error to retry). On that flip the screen tells
+/// the [onboardingGateProvider] to advance to the app shell — the routing the
+/// `AuthGate` reads — so the user lands on Home.
 class OnboardingScreen extends ConsumerWidget {
   const OnboardingScreen({super.key});
 
@@ -32,6 +34,17 @@ class OnboardingScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final state = ref.watch(onboardingControllerProvider);
     final controller = ref.read(onboardingControllerProvider.notifier);
+    // Once the flow completes (draft persisted), flip the gate so the AuthGate
+    // routes on to the shell. Done via a listener rather than in the controller
+    // so the flow stays decoupled from the routing layer.
+    ref.listen(
+      onboardingControllerProvider.select((s) => s.completed),
+      (_, completed) {
+        if (completed) {
+          ref.read(onboardingGateProvider.notifier).markComplete();
+        }
+      },
+    );
     // Watching the full state above already rebuilds on every change, so reading
     // the derived gate off the controller here stays in sync.
     final canAdvance = controller.canAdvance;

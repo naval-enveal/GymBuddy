@@ -36,6 +36,9 @@ class _FakeProfileApi implements ProfileApi {
     calls++;
     if (error != null) throw error!;
   }
+
+  @override
+  Future<bool> fetchOnboardingComplete() async => false;
 }
 
 Future<void> _mount(WidgetTester tester, ProviderContainer container) async {

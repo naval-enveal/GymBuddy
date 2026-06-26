@@ -14,42 +14,42 @@
 ---
 
 ## Next up
-**M3 · Onboarding is underway** on branch `m3-onboarding` (cut from `dev` after
-M2 merged). The flow is now seven steps: `features/onboarding/onboarding_screen.dart`
-(`OnboardingScreen`, a `ConsumerWidget`) renders goals, experience, days/week,
-equipment, injuries, body stats, and a closing health-data permission step,
-driven entirely by `onboardingControllerProvider`
-(`OnboardingController`/`OnboardingState`/`OnboardingDraft` in
-`onboarding_controller.dart`; the wire-mirrored answer enums in
-`onboarding_options.dart`). The screen is pure presentation: a per-step
-`Continue`/`Finish` gated on `controller.canAdvance`, a Back button (hidden on
-step 1), a `Step X of N` progress bar, body-stats range parsing, and the final
-step's `health-connect` button forwarding to
-`OnboardingController.requestHealthPermission()`. That permission ask goes
-through `core/health/health_permission_service.dart`
-(`HealthPermissionService` interface + default `MockHealthPermissionService`,
-`healthPermissionServiceProvider`) — the M5 HealthKit / Health Connect impls
-override that provider; the resulting `HealthPermissionStatus` lands on the
-draft (kept client-side, not part of the Profile payload).
+**M3 · Onboarding is complete** on branch `m3-onboarding` (cut from `dev` after
+M2 merged); a PR into `dev` ("Milestone M3: onboarding") is open and awaiting a
+human review + merge. Do not start M4 until that lands — the next run cuts a
+fresh `m4-plans` branch from `dev` after the merge.
 
-**Next task: route to Home on completion.** Persistence is now wired:
-`OnboardingController.complete()` is async — it maps the `OnboardingDraft` to
-the Profile wire shape and `PUT`s it through `profileApiProvider`
-(`features/onboarding/profile_api.dart`, `ProfileApi.saveOnboarding`) to the new
-backend `PUT /profile`, then flips `OnboardingState.completed` only on success
-(a failed save sets `OnboardingState.saveError` and leaves the user on the last
-step to retry; `OnboardingState.saving` drives the Finish spinner). The
-device-level `healthPermission` is intentionally NOT sent. What's left is
-navigation: there is still no router — `OnboardingScreen` does not navigate when
-`completed` flips, and nothing yet decides onboarding-vs-Home at launch. Wire
-that with the routing task, likely via the `AuthGate` (which today only branches
-signed-in/out): after auth, fetch the profile (`GET /profile`) and route to
-onboarding when `profile == null` or `onboardingComplete == false`, else the
-shell; have `OnboardingScreen` trigger that transition on `completed`. The
-backend Profile API is in place — `server/src/{routes,controllers,services,
-validators}/profile.*` (`GET`/`PUT /profile`, both `requireAuth`; the bespoke
-`validateProfile` middleware mirrors the model bounds and drops unknown keys),
-mounted at `/profile` in `app.js`.
+Routing is now wired through the gate. `AuthGate`
+(`features/auth/auth_gate.dart`) still branches signed-in/out, but the
+authenticated branch now renders `_OnboardingRouter`, which watches
+`onboardingGateProvider` (`features/onboarding/onboarding_gate.dart`,
+`OnboardingGateController extends AsyncNotifier<bool>`). The gate's `build()`
+reads `ProfileApi.fetchOnboardingComplete()` (`GET /profile`, response
+`{ profile: {...} | null }`) — a null profile or unset `onboardingComplete` both
+mean "needs onboarding". `data(false)` → `OnboardingScreen`, `data(true)` →
+`AppShell`, loading → splash, error → an `onboarding-gate-retry` screen that
+`ref.invalidate`s the gate. On finishing, `OnboardingScreen` watches
+`OnboardingState.completed` via `ref.listen` and calls
+`onboardingGateProvider.notifier.markComplete()` (sets `AsyncData(true)`), so the
+gate routes on to the shell without a second round-trip (the just-completed
+`complete()` already persisted the flag). Note: Riverpod 3.x auto-retries errored
+providers with backoff, so the gate's manual retry sits on top of that; the gate
+widget tests disable auto-retry (`ProviderContainer(retry: (_, _) => null)`) to
+keep the error path deterministic.
+
+The rest of the onboarding flow is unchanged: seven steps in
+`features/onboarding/onboarding_screen.dart` (`OnboardingScreen`,
+`ConsumerWidget`) driven by `onboardingControllerProvider`
+(`OnboardingController`/`OnboardingState`/`OnboardingDraft` in
+`onboarding_controller.dart`; wire-mirrored answer enums in
+`onboarding_options.dart`). `OnboardingController.complete()` maps the draft to
+the Profile wire shape and `PUT`s it via `profileApiProvider`
+(`features/onboarding/profile_api.dart`), flipping `completed` only on success
+(failure → `saveError`, stay on last step). The device-level `healthPermission`
+(from `core/health/health_permission_service.dart`) is kept on the draft but not
+persisted. Backend Profile API:
+`server/src/{routes,controllers,services,validators}/profile.*`
+(`GET`/`PUT /profile`, both `requireAuth`), mounted at `/profile` in `app.js`.
 
 Auth is now fully wired end to end: the signed-out landing
 (`features/auth/signed_out_screen.dart`) routes into `features/auth/auth_screen.dart`
@@ -96,11 +96,11 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] API client with secure token storage + refresh interceptor
 - [x] Login / signup screens wired to M1 endpoints
 
-### M3 — Onboarding  `[ ]`
+### M3 — Onboarding  `[x]`
 - [x] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
 - [x] Health-data permission request step
 - [x] Answers persisted via Profile API
-- [ ] Routes to Home on completion
+- [x] Routes to Home on completion
 
 ### M4 — Workout plans (general / free)  `[ ]`
 - [ ] Template library seeded in backend
@@ -156,6 +156,27 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M3 · Onboarding routes to Home on completion, finishing M3. The
+  `AuthGate`'s authenticated branch no longer renders the shell directly; it now
+  renders `_OnboardingRouter` (`features/auth/auth_gate.dart`), which watches the
+  new `onboardingGateProvider` (`features/onboarding/onboarding_gate.dart`,
+  `OnboardingGateController extends AsyncNotifier<bool>`). The gate's `build()`
+  reads `ProfileApi.fetchOnboardingComplete()` — a new `GET /profile` call
+  (`features/onboarding/profile_api.dart`) that returns `false` for a null
+  profile or an unset `onboardingComplete` flag (both mean onboarding is still
+  needed). The router maps `data(true)` → `AppShell`, `data(false)` →
+  `OnboardingScreen`, `loading` → the auth splash, and `error` → a retry screen
+  (`onboarding-gate-retry`) that `ref.invalidate`s the gate rather than guessing.
+  `OnboardingScreen` now `ref.listen`s `OnboardingState.completed` and, on the
+  flip, calls `onboardingGateProvider.notifier.markComplete()` (→
+  `AsyncData(true)`), so a finished flow routes straight to the shell with no
+  extra round-trip — the controller stays decoupled from routing. Riverpod 3.x
+  auto-retries errored providers, so the manual retry is additive; the gate tests
+  pin the error path with `ProviderContainer(retry: (_, _) => null)`. 3 new
+  widget tests (`auth_gate_test.dart`: authenticated-but-incomplete lands on the
+  flow, finishing routes to the shell, a failed status check shows a retry that
+  recovers); the existing shell + gate tests updated to serve / override the
+  `/profile` check. `flutter analyze` clean, `flutter test` 78/78 green.
 - 2026-06-26 · M3 · Onboarding answers persist via the Profile API. New backend
   Profile endpoints (`GET`/`PUT /profile`, both behind `requireAuth`):
   `routes/profile.routes.js` → `controllers/profile.controller.js` →
