@@ -14,12 +14,24 @@
 ---
 
 ## Next up
-**M2 is complete** — all four tasks are checked. A PR from `m2-flutter-shell`
-into `dev` ("Milestone M2: Flutter foundation + design system + shell") is open
-for human review; do not merge or cut the next branch. After it merges, the next
-run cuts a fresh branch from `dev` and starts **M3 · Onboarding** (first task:
-the 5–7 step flow — goals, experience, days/week, equipment, injuries, body
-stats).
+**M3 · Onboarding is underway** on branch `m3-onboarding` (cut from `dev` after
+M2 merged). The 5–7 step flow is built: `features/onboarding/onboarding_screen.dart`
+(`OnboardingScreen`, a `ConsumerWidget`) renders the six steps — goals,
+experience, days/week, equipment, injuries, body stats — driven entirely by
+`onboardingControllerProvider` (`OnboardingController`/`OnboardingState`/
+`OnboardingDraft` in `onboarding_controller.dart`; the wire-mirrored answer
+enums in `onboarding_options.dart`). The screen is pure presentation: a
+per-step `Continue`/`Finish` gated on `controller.canAdvance`, a Back button
+(hidden on step 1), a `Step X of N` progress bar, and the body-stats step does
+presentation-level range parsing before handing values to the controller.
+
+**Next task: the health-data permission request step.** Then answers persisted
+via the Profile API (`POST`/`PUT` profile, mapping `OnboardingDraft` → the
+Profile model's `goals/experience/daysPerWeek/equipment/injuries/bodyStats`
+wire shape — `OnboardingController.complete()` already flips
+`OnboardingState.completed` as the handoff point), then routing to Home on
+completion (no router yet — `OnboardingScreen` does not navigate on
+`completed`; wire that with the routing task, likely via the `AuthGate`).
 
 Auth is now fully wired end to end: the signed-out landing
 (`features/auth/signed_out_screen.dart`) routes into `features/auth/auth_screen.dart`
@@ -67,7 +79,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Login / signup screens wired to M1 endpoints
 
 ### M3 — Onboarding  `[ ]`
-- [ ] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
+- [x] 5–7 step flow (goals, experience, days/week, equipment, injuries, body stats)
 - [ ] Health-data permission request step
 - [ ] Answers persisted via Profile API
 - [ ] Routes to Home on completion
@@ -126,6 +138,31 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-26 · M3 · The 5–7 step onboarding flow UI shipped. New
+  `features/onboarding/onboarding_screen.dart` (`OnboardingScreen`, a
+  `ConsumerWidget`) renders the six steps — goals (multi-select), experience
+  (single-select with descriptions), days/week (1–7 chips), equipment
+  (multi-select; "None" clears the rest), injuries (optional add/remove chips),
+  and body stats (optional height/weight/age/sex) — over the existing
+  `onboardingControllerProvider`. Per the no-logic-in-widgets rule the screen is
+  pure presentation: it reads `OnboardingState`, forwards taps to the
+  controller, gates the per-step `Continue`/`Finish` button on
+  `controller.canAdvance` (goals/experience/days/equipment require a selection;
+  injuries and body stats never block), shows a Back button (hidden on step 1)
+  and a `Step X of N` progress bar, and the body-stats step keeps local text
+  controllers and does presentation-level range parsing (mirroring the server's
+  Profile bounds via `OnboardingLimits`) before handing only in-range/null
+  values to the controller. Finishing the last step calls
+  `OnboardingController.complete()`, flipping `OnboardingState.completed` — the
+  handoff point for the persistence + routing tasks that follow (the screen does
+  not yet navigate on completion). Reusable `_OptionTile`/`_DayChip` built from
+  the design tokens (accent-fill selected state, ≥48dp targets). 15 new tests
+  (`test/features/onboarding/`): 11 controller tests (selection, toggles, the
+  equipment "None" exclusivity, injury trim/dedupe/truncate, day clamping, the
+  advance gate per step, complete) and 4 widget tests (gate disabled until a
+  goal is picked, Back hidden on step 1, a full walk through all six steps that
+  asserts `completed` + the collected draft, and out-of-range body stats dropped
+  to null). `flutter analyze` clean, `flutter test` 68/68 green.
 - 2026-06-26 · M2 · Login / signup screens wired to the M1 `/auth/*` endpoints,
   completing M2. New `features/auth/auth_screen.dart` is one form serving both
   modes (toggled in place via an `auth-toggle` button) so the user can switch
