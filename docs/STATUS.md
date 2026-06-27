@@ -14,28 +14,46 @@
 ---
 
 ## Next up
-**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–3 are done:
-both native sides mirror the `gymbuddy/glasses` wire contract, and the Dart
-`MetaGlassesSensorSource` now binds to those channels. **Next: task 4 —
-capability detection + fallback to `MockSensorSource`.** This rewires
-`workoutSensorSourceProvider` (currently a hard-coded `MockSensorSource` in
-`sensor_source.dart`) so the app picks the real source when the glasses are
-present and silently falls back to the mock otherwise. The seam to build on:
-`MetaGlassesSensorSource.connect()` already returns
-`SensorAvailability.unavailable` (and empty `capabilities`) whenever the native
-`connect` reports no SDK / throws / the channel is unregistered — so the
-detection step is just: construct the glasses source, `connect()`, and if the
-result is `unavailable`, dispose it and hand back a `MockSensorSource` instead
-(otherwise keep the glasses source). Because the provider is synchronous today,
-this likely means an async resolver (e.g. a small `FutureProvider`/`AsyncNotifier`
-that performs the `connect()` probe once, or an override installed at the
-composition root in `main.dart` after probing — mirror how `main.dart` already
-overrides `vitalsReaderProvider`/`healthPermissionServiceProvider`). Whatever the
-shape, the workout session controller must keep working unchanged against
-whichever source it's handed, and the whole thing must still build + run with no
-hardware (every test runs against the mock). Note: native Kotlin/Swift can't be
-compiled in this headless env (no Android SDK / Xcode) — the verifiable gate
+**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–4 are done:
+both native sides mirror the `gymbuddy/glasses` wire contract, the Dart
+`MetaGlassesSensorSource` binds to those channels, and the composition root now
+probes the glasses once and falls back to `MockSensorSource` when they're
+unavailable. **Next: task 5 — audio cue playback through the glasses speakers.**
+This is the first *output* path back to the glasses (everything so far has been
+input: reps/form in). It will need a new method on the native control channel
+(e.g. `speak`/`playCue` over `gymbuddy/glasses`) on both Kotlin and Swift, a Dart
+affordance on `MetaGlassesSensorSource` to invoke it, and — keeping the mock-first
+rule — a graceful no-op when the glasses are absent (the app falls back to the
+mock, which has no speakers, so audio cues must degrade silently rather than
+assume hardware). Consider whether cue playback belongs on `WorkoutSensorSource`
+itself (so the session/coach layer can call it through the same seam the rest of
+the hardware goes through) or on a sibling output interface. Native Kotlin/Swift
+still can't be compiled headless (no Android SDK / Xcode) — the verifiable gate
 stays `flutter analyze` + `flutter test`.
+
+Capability-detection design notes (task 4, done): the M7 fallback lives in
+`app/lib/sensors/sensor_source_resolver.dart` — a single async
+`resolveWorkoutSensorSource({glassesFactory, mockFactory})` that constructs the
+glasses source, `connect()`s it once, and **keeps it only when it reports
+`SensorAvailability.available`**; on `unavailable` (no DAT SDK, channel
+unregistered, no pair) — or any unexpected throw from the probe — it `dispose()`s
+the glasses and returns a fresh `MockSensorSource`. The factories default to
+`MetaGlassesSensorSource.new` / `MockSensorSource.new` and are injectable so the
+resolver is unit-tested with fake sources and no platform channels.
+`workoutSensorSourceProvider` stays a **synchronous** `Provider` (default still
+the mock, so every existing test is untouched), and `main()` is now `async`:
+`WidgetsFlutterBinding.ensureInitialized()` → `await
+resolveWorkoutSensorSource()` → `workoutSensorSourceProvider.overrideWith((ref){
+ref.onDispose(source.dispose); return source; })`, alongside the existing
+health/vitals overrides. The session controller reads the provider unchanged
+(`ref.read(workoutSensorSourceProvider)`), and because the resolved mock's
+`connect()` is an always-succeeds no-op, the controller can still call `connect()`
+again with no special-casing. 4 tests
+(`test/sensors/sensor_source_resolver_test.dart`): keep-on-available (mock never
+built), dispose+fallback-on-unavailable, fallback-when-probe-throws, and the
+defaults path (no native handler → real `MissingPluginException` → real
+`MockSensorSource`). `flutter analyze` clean, `flutter test` 217/217 green
+(native can't be compiled headless; the Dart gate is what's verified).
 
 MetaGlassesSensorSource design notes (task 3, done): the real glasses-backed
 `WorkoutSensorSource` lives in `app/lib/sensors/meta_glasses_sensor_source.dart`
@@ -578,7 +596,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
 - [x] iOS (Swift) platform channel wrapping DAT SDK
 - [x] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
-- [ ] Capability detection + fallback to MockSensorSource
+- [x] Capability detection + fallback to MockSensorSource
 - [ ] Audio cue playback through glasses speakers
 - [ ] Custom mic-based wake trigger for Q&A
 - [ ] App builds + runs with no hardware present
@@ -609,6 +627,26 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · Capability detection + fallback to `MockSensorSource`. New
+  `app/lib/sensors/sensor_source_resolver.dart` exposes
+  `resolveWorkoutSensorSource({glassesFactory, mockFactory})`: it builds the
+  glasses source, `connect()`s it once, and keeps it only when the handshake
+  reports `SensorAvailability.available`; otherwise (`unavailable` — no DAT SDK /
+  unregistered channel / no pair — or any unexpected throw from the probe) it
+  `dispose()`s the glasses and returns a fresh `MockSensorSource`, so the workout
+  always has a usable source. Factories default to `MetaGlassesSensorSource.new` /
+  `MockSensorSource.new` and are injectable for hardware-free unit tests.
+  `workoutSensorSourceProvider` stays a synchronous `Provider` (default still the
+  mock, leaving every existing test untouched); `main()` is now `async` and, after
+  `WidgetsFlutterBinding.ensureInitialized()` + `await
+  resolveWorkoutSensorSource()`, overrides the provider at the composition root
+  (`overrideWith` keeping `ref.onDispose(source.dispose)`), beside the existing
+  health/vitals overrides. The session controller reads the provider unchanged,
+  and the resolved mock's no-op `connect()` means it can re-`connect()` with no
+  special-casing. 4 tests (`test/sensors/sensor_source_resolver_test.dart`):
+  keep-on-available, dispose+fallback-on-unavailable, fallback-when-probe-throws,
+  and the real-defaults path (no native handler → `MissingPluginException` → real
+  `MockSensorSource`). `flutter analyze` clean, `flutter test` 217/217 green.
 - 2026-06-27 · M7 · `MetaGlassesSensorSource` — the Dart binding that implements
   `WorkoutSensorSource` over the glasses platform channels. New
   `app/lib/sensors/meta_glasses_sensor_source.dart` talks to the control

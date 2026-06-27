@@ -8,8 +8,10 @@ import 'package:gymbuddy/core/health/vitals_reader.dart';
 import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/auth/auth_controller.dart';
 import 'package:gymbuddy/features/auth/auth_gate.dart';
+import 'package:gymbuddy/sensors/sensor_source.dart';
+import 'package:gymbuddy/sensors/sensor_source_resolver.dart';
 
-void main() {
+Future<void> main() async {
   // ProviderScope is the root of Riverpod's state graph; every provider read in
   // the app resolves against it. Wiring it here (M0) lets later milestones add
   // providers without touching bootstrap.
@@ -21,6 +23,14 @@ void main() {
   // The health-permission service and vitals reader are overridden to the real
   // HealthKit / Health Connect implementations here too; both providers default
   // to mocks so tests and hardware-free dev builds keep working untouched.
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // M7 capability detection: probe the real glasses source once at the
+  // composition root and override the (synchronous) sensor provider with
+  // whatever it resolves to — the glasses when they're available, otherwise the
+  // mock. The session controller reads `workoutSensorSourceProvider` unchanged.
+  final sensorSource = await resolveWorkoutSensorSource();
+
   runApp(
     ProviderScope(
       overrides: [
@@ -34,6 +44,10 @@ void main() {
         vitalsReaderProvider.overrideWithValue(
           HealthPackageVitalsReader(),
         ),
+        workoutSensorSourceProvider.overrideWith((ref) {
+          ref.onDispose(sensorSource.dispose);
+          return sensorSource;
+        }),
       ],
       child: const GymBuddyApp(),
     ),
