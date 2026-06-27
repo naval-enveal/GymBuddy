@@ -15,11 +15,10 @@
 
 ## Next up
 **M6 is complete** — all five tasks are checked on branch `m6-session` (cut from
-`dev` after M5 merged via PR #5). The PR into `dev` ("Milestone M6: session") is
-the next action; a human reviews and merges. After the merge, the next run cuts
-`m7-glasses` from `dev` — but **M7 is tagged [HARDWARE-REQUIRED]** and is not
-[GATE CLEARED], so that run should print `HUMAN_GATE: M7` and stop until a human
-clears the gate.
+`dev` after M5 merged via PR #5). The PR into `dev` ("Milestone M6: session") has
+been merged. **M7 is now [GATE CLEARED]** — proceed with the first unchecked M7
+task. M7 tasks must run without hardware (MockSensorSource fallback). Cut branch
+`m7-glasses` from `dev` and begin the first task.
 
 WorkoutLog-sync design notes (this task, done): the post-workout summary now
 persists to the backend on completion. **Server:** new `POST /workout-logs`
@@ -464,7 +463,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Manual rep/weight logging fallback
 - [x] Post-workout summary syncs to WorkoutLog
 
-### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  `[ ]`
+### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
 - [ ] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
 - [ ] iOS (Swift) platform channel wrapping DAT SDK
 - [ ] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
