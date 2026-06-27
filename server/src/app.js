@@ -5,6 +5,7 @@ const healthRoutes = require('./routes/health.routes');
 const authRoutes = require('./routes/auth.routes');
 const profileRoutes = require('./routes/profile.routes');
 const planRoutes = require('./routes/plan.routes');
+const workoutLogRoutes = require('./routes/workout-log.routes');
 const { errorHandler } = require('./middleware/error.middleware');
 
 /**
@@ -22,6 +23,7 @@ function createApp() {
   app.use('/auth', authRoutes);
   app.use('/profile', profileRoutes);
   app.use('/plans', planRoutes);
+  app.use('/workout-logs', workoutLogRoutes);
 
   // 404 fallback.
   app.use((req, res) => {

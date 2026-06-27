@@ -14,14 +14,178 @@
 ---
 
 ## Next up
-**M5 · Vitals dashboard is complete** on branch `m5-vitals` — all four tasks are
-checked. Open a PR "Milestone M5: vitals" from `m5-vitals` into `dev` and stop;
-a human reviews + merges. After the merge, the next run cuts `m6-session` from
-`dev` and starts **M6 — Workout session engine + logging**, whose first task is
-**`WorkoutSensorSource` interface + `MockSensorSource` defined** (the hardware
-abstraction in `app/lib/sensors/sensor_source.dart` — `sensor_source.dart`
-already exists as a stub; define the interface and the mock so rep/form features
-build and run with no glasses attached, per the M7/guardrail rule).
+**M6 is complete** — all five tasks are checked on branch `m6-session` (cut from
+`dev` after M5 merged via PR #5). The PR into `dev` ("Milestone M6: session") is
+the next action; a human reviews and merges. After the merge, the next run cuts
+`m7-glasses` from `dev` — but **M7 is tagged [HARDWARE-REQUIRED]** and is not
+[GATE CLEARED], so that run should print `HUMAN_GATE: M7` and stop until a human
+clears the gate.
+
+WorkoutLog-sync design notes (this task, done): the post-workout summary now
+persists to the backend on completion. **Server:** new `POST /workout-logs`
+(`requireAuth` → `validateWorkoutLog` → `createLog`), mounted at `/workout-logs`
+in `app.js`, wired `routes/workout-log.routes.js` →
+`controllers/workout-log.controller.js` → `services/workout-log.service.js`
+(`createLog(userId, payload)` stamps `user: userId` so the owner is never
+trusted from the body) over the existing M1 `WorkoutLog` model
+(`{user, plan?, workout?, startedAt(req), completedAt?, durationSeconds?,
+exercises:[{name, sets:[{reps?, weightKg?, completed}]}], notes?}`).
+`validators/workout-log.validators.js` mirrors the profile-validator spirit:
+`startedAt` required (ISO/epoch → Date), everything else optional, per-field
+bounds + sanity caps, and it replaces `req.body` with only the declared fields
+(strips a smuggled `user`). Returns `201 { log }`. 8 tests
+(`tests/workout-logs.test.js`): auth required, full persist + owned-to-caller,
+ignores a body `user`, minimal (startedAt-only), and four validation rejects.
+**Client:** `features/workout/workout_log_api.dart` — `WorkoutLogApi.saveLog({
+startedAt, completedAt, sets })` over `apiClientProvider` (mirrors
+`plan_api.dart`), groups the flat `List<CompletedSet>` into per-exercise blocks
+by consecutive name (preserving order), omits `weightKg` when `weight` is null
+(bodyweight), and derives `durationSeconds` from the timestamps (clamped ≥ 0);
+`workoutLogApiProvider`. The session controller
+(`workout_session_controller.dart`) captures `_startedAt` at `start()`, clears
+it at `stop()`, and fires a best-effort `_syncLog()` (`unawaited`, errors
+swallowed so a failed sync never blocks the return to idle) at **both**
+completion transitions (the last-set branch of `completeSet()` and the
+defensive completion branch of `_advance()` — mutually exclusive, so exactly one
+POST per finished workout); `_syncLog` no-ops when there's nothing recorded.
+7 new tests: 3 API wire (`workout_log_api_test.dart` — grouping + weight-omit +
+duration via `MockClient`, negative-duration clamp, non-2xx → `ApiException`) and
+4 controller (`workout_session_controller_test.dart` — syncs sets in order on
+completion + timestamp window, manual weight carried into the sync, no sync when
+stopped early, a throwing sync doesn't block completion). The existing
+`makeSession` helper now also overrides `workoutLogApiProvider` with a recording
+fake so completing-workout tests fire no real network call. `flutter analyze`
+clean, `flutter test` 199/199 green; `npm run lint` clean, `npm test` 107/107.
+
+Manual logging design notes (prior task, done): the no-glasses logging path.
+`CompletedSet` gained a nullable `double? weight` (null = unlogged/bodyweight,
+part of value identity) and `WorkoutSessionState` a transient `double? weight`
+for the *current* set (reset to null at the start of every set via a `copyWith`
+`clearWeight` flag, mirroring `clearFormCue`). The controller
+(`workout_session_controller.dart`) added two synchronous, exercising-only
+affordances: `setReps(int)` — overrides the counted reps (clamped ≥ 0; unlike a
+sensor rep it never trips auto-advance, so a lifter can correct a miscount or log
+reps by hand) — and `setWeight(double?)` (null/negative clears). `completeSet()`
+now snapshots both `state.reps` *and* `state.weight` into the `CompletedSet`.
+Surfaced in `_ExercisingView`: a `_RepStepper` flanks the `RepCounter` with
+`rep-decrement`/`rep-increment` `IconButton`s (decrement disabled at 0) that
+dispatch `setReps(reps ± 1)`, and a `_WeightInput` (`Key('weight-input')`,
+stateful only for its `TextEditingController`, keyed by exercise+set so a new set
+clears it) forwards parsed input via `setWeight`. `_CompletedSetTile` shows
+"{weight} kg × {reps} reps" when a weight was logged. The mapper needs no change
+— `PlanExercise` carries no weight, so the session default is simply null. 11 new
+tests (6 controller: setReps override/clamp/no-op, setWeight record/clear/no-op,
+completeSet snapshot, per-set reset; 1 model: `CompletedSet` weight equality; 4
+widget: rep stepper forwards ±, decrement disabled at 0, weight input forwards
+double/null, completed tile shows the load). `flutter analyze` clean, `flutter
+test` 192/192 green.
+
+Focus-mode UI design notes (this task, done): `features/workout/workout_screen.dart`
+is now a `ConsumerWidget` over `workoutSessionControllerProvider` — pure
+presentation that renders `WorkoutSessionState` and forwards the controller's
+manual actions (`completeSet`/`skipRest`/`stop`), no logic in the widget. A
+`switch (session.status)` picks the body: `idle` → `_StartView`, `exercising` →
+`_ExercisingView`, `resting` → `_RestingView`, `completed` → `_CompletedView`
+(the app-bar title shows the plan name once a session is live). `_StartView`
+(itself a `ConsumerWidget`, so the active-plan read only fires at rest) watches
+`activePlanControllerProvider` and renders its `AsyncValue`: spinner
+(`Key('workout-loading')`), retryable error (`Key('workout-error')` →
+`ref.invalidate`), then either `_StartReady` (plan name + first non-empty
+training day + a `workout-start-button` that maps the day via
+`PlanWorkout.toSessionPlan()` and calls `start()`) or `_NoPlan`
+(`Key('workout-empty')`, points at the Plans tab). `_ExercisingView` shows the
+`_SessionProgress` line ("Exercise n of m"), the exercise name + "Set x of y",
+the design-system `RepCounter` (reps vs `targetReps`), a severity-colored
+`_FormCueBanner` (`Key('form-cue')`, good→accent / minor→warning / major→error,
+`SizedBox.shrink` when null so the layout doesn't jump), a `complete-set-button`,
+and a muted `stop-workout-button`. `_RestingView` draws the `RestTimer`
+(`remaining` off `restRemaining`, `total` off the current exercise's
+`restSeconds`) with a `skip-rest-button`. `_CompletedView` lists the
+`completedSets` ("{n} sets · {reps} reps" header + a tile per set) with a
+`workout-done-button` that calls `stop()` → idle (the WorkoutLog sync is the next
+task). The Workout tab builds eagerly in the shell's `IndexedStack`, so the
+shell test already stubs `planApiProvider`. 7 widget tests
+(`test/features/workout/workout_screen_test.dart`): the idle→start path drives
+the real controller over a manual `MockSensorSource` (`autoSimulate: false`) to
+confirm the tab wires to the active plan and transitions to exercising; the four
+presentation views are driven by a `_SeededController` (a `WorkoutSessionController`
+subclass returning a fixed state with no-op, call-counting actions — no sensors
+or timers) to assert rendering + action-forwarding (complete-set/skip/done), plus
+the empty and error idle states. `flutter analyze` clean, `flutter test` 183/183
+green. (`MockSensorSource`'s `autoSimulate: true` app default makes reps tick on
+their own in dev builds, so focus mode animates with no glasses.)
+
+Session state-machine design notes (this task, done): the engine lives in
+`features/workout/`, fully decoupled from the plans feature. `session_models.dart`
+holds the feature-agnostic value types — `SessionExercise`
+(`{TrackedExercise exercise, int sets, int? targetReps, int restSeconds}`; a null
+`targetReps` = a "to failure"/time-based set that never auto-advances),
+`SessionPlan` (`{name, List<SessionExercise>}`, with a const `empty`),
+`CompletedSet` (`{exerciseName, setNumber, reps}`, accumulated as the session
+advances to feed the later WorkoutLog sync), `SessionStatus`
+(`idle`/`exercising`/`resting`/`completed`), and the immutable
+`WorkoutSessionState` (status, plan, `exerciseIndex` 0-based, `setNumber`
+1-based, `reps`, `restRemaining`, `completedSets`, nullable `formCue`) with
+derived getters (`currentExercise`, `targetReps`, `exerciseNumber`,
+`isExercising`/`isResting`/…) and a `copyWith` whose `clearFormCue` flag nulls
+the cue (plain `copyWith` can't pass null). `session_mapper.dart` is the **single
+seam** to the plans models: `PlanWorkout.toSessionPlan()` reduces each
+`PlanExercise` to a `TrackedExercise` (+ prescription, null-safe defaults: 1 set,
+60s rest) — the controller itself never imports the plans feature.
+`workout_session_controller.dart` — `WorkoutSessionController extends
+Notifier<WorkoutSessionState>` (provider `workoutSessionControllerProvider`,
+non-autoDispose): `start(plan)` connects `workoutSensorSourceProvider`,
+subscribes to its `reps`/`formCues` broadcast streams, and tracks the first
+exercise (no-op on an empty plan or an already-active session); a rep at/over
+`targetReps` auto-completes the set; `completeSet()` records the set and either
+enters a rest countdown (`Timer.periodic(1s)` decrementing `restRemaining`, which
+auto-advances at zero — or immediately when rest ≤ 0) or finishes the workout if
+it was the last set; `skipRest()` jumps past the countdown; `_advance()` moves to
+the next set or exercise (resetting reps + resuming tracking) or completes;
+`stop()` tears down and returns to idle. Guards: reps/cues are ignored unless
+exercising, and `completeSet()` flips status synchronously before the async
+`stopTracking()` so a straggler rep can't double-complete. `completeSet()` is
+also the manual seam the manual-logging fallback (a later task) builds on. Runs
+end to end against `MockSensorSource` with no glasses. 20 tests
+(`test/features/workout/`): 6 model/mapper (`session_models_test.dart` — value
+equality, derived getters, `copyWith` cue-clearing, the `toSessionPlan` edge with
+default fallbacks) and 14 controller (`workout_session_controller_test.dart` —
+start/empty-plan/no-restart, rep counting, auto-advance on target, null-target
+manual completion, rest-phase reps ignored, skipRest, next-exercise advance,
+final-set completion, zero-rest immediate advance, form-cue surface+clear on
+advance, stop→idle, and a `fakeAsync` rest-countdown tick test mirroring the mock
+sensor's timer pattern). `flutter analyze` clean, `flutter test` 176/176 green.
+
+Sensor-layer design notes (this task, done): the hardware abstraction lives in
+`app/lib/sensors/`. `sensor_source.dart` defines `WorkoutSensorSource` (an
+`abstract interface class`) plus its value types — `SensorCapabilities`
+(`repCounting`/`formTracking`, read before surfacing capability-gated UI),
+`SensorAvailability` (`available`/`unavailable`, what M7's capability detection
+falls back on), `TrackedExercise` (a minimal, feature-agnostic `{name,
+formTracked}` descriptor so the `sensors/` layer never depends on the plans
+models), `RepEvent` (`{index (1-based, resets per set), timestamp, confidence?}`)
+and `FormCue` (`{severity, message}`, `FormSeverity` good/minor/major). The
+interface exposes broadcast `Stream<RepEvent> reps` + `Stream<FormCue> formCues`
+and lifecycle `connect() → startTracking(exercise) → stopTracking() → dispose()`.
+`workoutSensorSourceProvider` defaults to `MockSensorSource` (mock-first rule —
+M7 overrides it with the DAT-SDK-backed source that itself falls back to the mock
+when glasses report `unavailable`). `mock_sensor_source.dart` —
+`MockSensorSource` advertises full capabilities; while tracking with
+`autoSimulate: true` (the app/dev default) it emits a rep every `repInterval` on
+a `Timer.periodic` plus a periodic "good form" cue for form-tracked exercises, so
+focus-mode UI animates with no hardware. Tests construct it with `autoSimulate:
+false` + an injected `clock` and drive `emitRep`/`emitFormCue` directly for
+determinism; `emitFormCue` no-ops for rep-only exercises (the source can't see
+form), `emitRep` no-ops before tracking, and any use after `dispose()` throws.
+20 tests (`test/sensors/mock_sensor_source_test.dart`): provider default, value
+equality for all four types, the mock contract (capabilities, connect, rep
+indexing + reset, form-cue gating, use-after-dispose), and two auto-simulation
+tests. **Gotcha for the next timer-driven tests:** the auto-simulation tests run
+under `fakeAsync` (added `fake_async` to dev_deps), NOT `testWidgets`/
+`tester.pump` — awaiting a broadcast `StreamController.close()` inside the
+widget-tester binding's fake-async zone never resolves and hangs the runner
+(reproduced cleanly in this env); `fakeAsync` + `async.elapse`/`flushMicrotasks`
+drives the periodic timer deterministically with no hang.
 
 Dashboard design notes (this task, done): `features/home/home_screen.dart` now
 renders the live vitals dashboard inside `VitalsPermissionGate` instead of a
@@ -293,12 +457,12 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Reads resting HR, HRV, sleep, steps, readiness proxy
 - [x] Home renders StatRings + sparklines, with empty states
 
-### M6 — Workout session engine + logging  `[ ]`
-- [ ] `WorkoutSensorSource` interface + `MockSensorSource` defined
-- [ ] Session state machine (exercise → set → rest → next)
-- [ ] Focus-mode UI (RepCounter, RestTimer)
-- [ ] Manual rep/weight logging fallback
-- [ ] Post-workout summary syncs to WorkoutLog
+### M6 — Workout session engine + logging  `[x]`
+- [x] `WorkoutSensorSource` interface + `MockSensorSource` defined
+- [x] Session state machine (exercise → set → rest → next)
+- [x] Focus-mode UI (RepCounter, RestTimer)
+- [x] Manual rep/weight logging fallback
+- [x] Post-workout summary syncs to WorkoutLog
 
 ### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  `[ ]`
 - [ ] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
@@ -335,6 +499,139 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M6 · Post-workout summary syncs to WorkoutLog, completing M6. The
+  finished session now persists to the backend on completion. Server: new
+  `POST /workout-logs` (`requireAuth` → `validateWorkoutLog` → `createLog`),
+  mounted at `/workout-logs` in `app.js`, wired routes →
+  controller → `workout-log.service.js` (`createLog(userId, payload)` stamps the
+  owning user server-side, never trusting a `user` in the body) over the existing
+  M1 `WorkoutLog` model. The validator mirrors the profile-validator spirit:
+  `startedAt` required (ISO/epoch → Date), all else optional with per-field bounds
+  and sanity caps, and it replaces `req.body` with only the declared fields.
+  Returns `201 { log }`. Client: `features/workout/workout_log_api.dart` —
+  `WorkoutLogApi.saveLog({startedAt, completedAt, sets})` over `apiClientProvider`
+  (mirrors `plan_api.dart`), grouping the flat `List<CompletedSet>` into
+  per-exercise blocks by consecutive name (order preserved), omitting `weightKg`
+  for bodyweight/unlogged sets, and deriving `durationSeconds` (clamped ≥ 0). The
+  session controller captures `_startedAt` at `start()`, clears it at `stop()`,
+  and fires a best-effort `_syncLog()` (`unawaited`, errors swallowed so a failed
+  sync never blocks the return to idle) at both completion transitions — exactly
+  one POST per finished workout. 15 new tests (8 server integration; 3 client API
+  wire + 4 controller sync), and `makeSession` now stubs `workoutLogApiProvider`
+  so completing-workout tests fire no real network call. `flutter analyze` clean,
+  `flutter test` 199/199 green; `npm run lint` clean, `npm test` 107/107.
+- 2026-06-27 · M6 · Manual rep/weight logging fallback — the no-glasses logging
+  path so a lifter with no sensor (or a rep the mock miscounted) can still log a
+  set. `CompletedSet` gained a nullable `double? weight` (null = unlogged /
+  bodyweight, now part of value identity) and `WorkoutSessionState` a transient
+  `double? weight` for the current set, reset to null at the start of every set
+  via a new `copyWith` `clearWeight` flag (mirroring `clearFormCue`). The session
+  controller added two synchronous, exercising-only affordances: `setReps(int)`
+  overrides the counted reps (clamped ≥ 0; unlike a sensor rep it never trips
+  auto-advance, so the lifter can correct a miscount or log reps by hand) and
+  `setWeight(double?)` records the load (null/negative clears it). `completeSet()`
+  now snapshots both `state.reps` and `state.weight` into the `CompletedSet`.
+  Surfaced in `_ExercisingView` (no logic in the widget): a `_RepStepper` flanks
+  the `RepCounter` with `rep-decrement`/`rep-increment` buttons (decrement
+  disabled at 0) that dispatch `setReps(reps ± 1)`, and a `_WeightInput` (stateful
+  only for its `TextEditingController`, keyed by exercise+set so a new set clears
+  it) forwards parsed input via `setWeight`; `_CompletedSetTile` shows
+  "{weight} kg × {reps} reps" when a weight was logged. The session mapper needs
+  no change — `PlanExercise` carries no weight, so the default is null. 11 new
+  tests (6 controller, 1 model, 4 widget). `flutter analyze` clean, `flutter test`
+  192/192 green.
+- 2026-06-27 · M6 · Focus-mode UI (RepCounter, RestTimer). The Workout tab
+  (`features/workout/workout_screen.dart`) replaces its `ComingSoon` placeholder
+  with a `ConsumerWidget` over `workoutSessionControllerProvider` — pure
+  presentation that renders `WorkoutSessionState` and forwards the controller's
+  manual actions (`completeSet`/`skipRest`/`stop`), no logic in the widget. A
+  `switch (session.status)` drives the body: `idle` → `_StartView`, `exercising`
+  → `_ExercisingView`, `resting` → `_RestingView`, `completed` →
+  `_CompletedView`. `_StartView` (a nested `ConsumerWidget`, so the active-plan
+  read only fires at rest) watches `activePlanControllerProvider` and renders the
+  `AsyncValue` — spinner / retryable error / `_StartReady` (plan + first non-empty
+  training day, a start button that maps the day via `PlanWorkout.toSessionPlan()`
+  and calls `start()`) / `_NoPlan` empty state. `_ExercisingView` shows
+  exercise/set progress, the design-system `RepCounter` (reps vs `targetReps`), a
+  severity-colored form-cue banner (good→accent / minor→warning / major→error,
+  hidden when null), and complete-set + stop actions. `_RestingView` draws the
+  `RestTimer` (`remaining` off `restRemaining`, `total` off the exercise's
+  `restSeconds`) with a skip action. `_CompletedView` lists the `completedSets`
+  ("{n} sets · {reps} reps" + a tile per set) with a done action that returns to
+  idle (the WorkoutLog sync is the next task). Against `MockSensorSource`
+  (`autoSimulate: true`, the app default) reps tick on their own, so focus mode
+  animates with no glasses. 7 widget tests
+  (`test/features/workout/workout_screen_test.dart`): the idle→start path drives
+  the real controller over a manual `MockSensorSource` to confirm the tab wires to
+  the active plan and transitions to exercising; the four views are driven by a
+  `_SeededController` (a `WorkoutSessionController` subclass returning a fixed
+  state with no-op, call-counting actions — no sensors/timers) to assert
+  rendering + action-forwarding, plus the empty and error idle states. `flutter
+  analyze` clean, `flutter test` 183/183 green.
+- 2026-06-27 · M6 · Session state machine (exercise → set → rest → next). New
+  `features/workout/` engine, fully decoupled from the plans feature.
+  `session_models.dart` defines the feature-agnostic value types —
+  `SessionExercise` (`{TrackedExercise exercise, int sets, int? targetReps,
+  int restSeconds}`; a null `targetReps` is a "to failure"/time-based set that
+  never auto-advances), `SessionPlan`, `CompletedSet` (accumulated for the later
+  WorkoutLog sync), `SessionStatus` (idle/exercising/resting/completed), and the
+  immutable `WorkoutSessionState` (status, plan, 0-based `exerciseIndex`, 1-based
+  `setNumber`, `reps`, `restRemaining`, `completedSets`, nullable `formCue`) with
+  derived getters and a `copyWith` whose `clearFormCue` flag nulls the cue.
+  `session_mapper.dart` is the single seam to the plans models —
+  `PlanWorkout.toSessionPlan()` reduces each `PlanExercise` to a `TrackedExercise`
+  (+ prescription, null-safe defaults: 1 set, 60s rest) so the controller never
+  imports the plans feature. `workout_session_controller.dart` —
+  `WorkoutSessionController extends Notifier<WorkoutSessionState>` (provider
+  `workoutSessionControllerProvider`): `start(plan)` connects
+  `workoutSensorSourceProvider`, subscribes to its broadcast `reps`/`formCues`,
+  and tracks the first exercise (no-op on an empty/already-active session); a rep
+  at/over `targetReps` auto-completes the set; `completeSet()` records it and
+  either runs a rest countdown (`Timer.periodic(1s)` over `restRemaining`,
+  auto-advancing at zero — or immediately when rest ≤ 0) or finishes the workout
+  on the last set; `skipRest()` jumps the countdown; `_advance()` moves to the
+  next set/exercise (resetting reps + resuming tracking) or completes; `stop()`
+  returns to idle. Reps/cues are ignored unless exercising, and `completeSet()`
+  flips status synchronously before the async `stopTracking()` so a straggler rep
+  can't double-complete; it's also the manual seam the later manual-logging
+  fallback builds on. Runs end to end against `MockSensorSource` with no glasses.
+  20 new tests (`test/features/workout/`): 6 model/mapper + 14 controller
+  (start/empty/no-restart, rep counting, auto-advance on target, null-target
+  manual completion, rest-phase reps ignored, skipRest, next-exercise advance,
+  final-set completion, zero-rest immediate advance, form-cue surface+clear, stop,
+  and a `fakeAsync` rest-countdown tick test). `flutter analyze` clean,
+  `flutter test` 176/176 green.
+- 2026-06-27 · M6 · `WorkoutSensorSource` interface + `MockSensorSource` defined,
+  starting M6 on branch `m6-session`. New `app/lib/sensors/sensor_source.dart`
+  defines the hardware abstraction every rep/form feature depends on:
+  `WorkoutSensorSource` (an `abstract interface class`) with broadcast
+  `Stream<RepEvent> reps` + `Stream<FormCue> formCues` and a
+  `connect() → startTracking(TrackedExercise) → stopTracking() → dispose()`
+  lifecycle, plus its feature-agnostic value types — `SensorCapabilities`
+  (`repCounting`/`formTracking`), `SensorAvailability` (`available`/`unavailable`,
+  for M7 capability detection + mock fallback), `TrackedExercise`
+  (`{name, formTracked}`, so the `sensors/` layer never depends on the plans
+  models), `RepEvent` (`{index (1-based per set), timestamp, confidence?}`) and
+  `FormCue` (`{severity, message}` over `FormSeverity` good/minor/major), all with
+  value equality. `workoutSensorSourceProvider` defaults to `MockSensorSource`
+  (mock-first rule; M7 overrides it with the DAT-SDK source that itself falls back
+  to the mock when glasses report `unavailable`). New `mock_sensor_source.dart` —
+  `MockSensorSource` advertises full capabilities and, while tracking with
+  `autoSimulate: true` (app/dev default), emits a rep every `repInterval` on a
+  `Timer.periodic` plus a periodic "good form" cue for form-tracked exercises, so
+  the focus-mode UI animates with no hardware; tests drive it deterministically
+  with `autoSimulate: false`, an injected `clock`, and direct
+  `emitRep`/`emitFormCue` (which no-op for rep-only exercises, before tracking, or
+  after `dispose()` — use-after-dispose throws). 20 new tests
+  (`app/test/sensors/mock_sensor_source_test.dart`): provider default, value
+  equality across all four types, the mock contract (capabilities, connect, rep
+  indexing + per-set reset, form-cue gating, use-after-dispose), and two
+  auto-simulation tests. The auto-simulation tests run under `fakeAsync` (added
+  `fake_async` to dev_dependencies), not `testWidgets`/`tester.pump`: awaiting a
+  broadcast `StreamController.close()` inside the widget-tester binding's
+  fake-async zone never resolves and hangs the runner (reproduced in this env), so
+  `fakeAsync` + `async.elapse`/`flushMicrotasks` drives the periodic timer
+  deterministically instead. `flutter analyze` clean, `flutter test` 156/156 green.
 - 2026-06-27 · M5 · Home renders the live vitals dashboard, completing M5.
   `features/home/home_screen.dart` replaces the granted-state placeholder with
   the real dashboard inside `VitalsPermissionGate`. `_VitalsDashboard`
