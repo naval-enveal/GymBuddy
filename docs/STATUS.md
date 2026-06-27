@@ -14,10 +14,16 @@
 ---
 
 ## Next up
-**M7 is complete** — PR opened from `m7-glasses` into `dev` for human review.
-All 7 tasks are done. **Do not merge and do not cut M8 until the PR is reviewed.**
-M8 is tagged `[HARDWARE-REQUIRED]` (no `[GATE CLEARED]`) and M9 is `[HUMAN GATE]`;
-both require a human to clear the gate before autonomous work can resume.
+**M8 is in progress** on branch `m8-pose` (cut from `dev`). Gate cleared by human
+decision: build mock-first, test on device later. Task 1 (tflite_flutter + pose
+abstraction) is done. **Next: task 2 — "Rep detection fed by active sensor
+source"**: wire pose frames into rep counting. `TflitePoseDetector` already
+subscribes to a `frameSource` stream; the job is to add a `PoseRepCounter`
+that tracks joint angles over consecutive frames and emits a `RepEvent` when a
+full up/down cycle completes, then feed it from `MetaGlassesSensorSource` so
+the real glasses path counts reps via pose instead of waiting for a native
+DAT-SDK rep event. `MockSensorSource` continues to emit reps directly
+(no model needed).
 
 Wake-trigger design notes (task 6, done): the second *input* path from the
 glasses — a control signal, not a tracking one. The mic listens for a fixed wake
@@ -651,8 +657,8 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Custom mic-based wake trigger for Q&A
 - [x] App builds + runs with no hardware present
 
-### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  `[ ]`
-- [ ] Pose model integrated (tflite_flutter)
+### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
+- [x] Pose model integrated (tflite_flutter)
 - [ ] Rep detection fed by active sensor source
 - [ ] Basic joint-angle checks
 - [ ] Initial mirror/POV-friendly exercise set
@@ -677,6 +683,25 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M8 · Pose model integrated (tflite_flutter). New `app/lib/core/pose/`:
+  `pose_landmarks.dart` — `KeypointId` enum (17 COCO keypoints), `Keypoint` value
+  type (x/y/confidence in 0..1), `PoseFrame` (list of keypoints + timestamp,
+  `operator[]` by id); `pose_detector.dart` — `PoseInput` typed camera-frame
+  value type (rgb bytes + width/height/timestamp, asserted-length), `PoseDetector`
+  interface (`isReady`, `Future<bool> init()`, `Stream<PoseFrame> frames`,
+  `dispose`), `poseDetectorProvider` (defaults to `MockPoseDetector`),
+  `MockPoseDetector` (broadcast `frames`, manual `emitFrame`, throws after
+  dispose); `tflite_pose_detector.dart` — `TflitePoseDetector` (`frameSource`
+  injectable stream, `modelAsset` injectable path, `loadInterpreter` injectable
+  loader for tests, lazy `init` that catches all failures + returns `false`,
+  `buildInputTensor` nearest-neighbour resize → `[1,192,192,3]` uint8
+  `@visibleForTesting` static, `decodeOutput` MoveNet `[1,1,17,3]`→`PoseFrame`
+  `@visibleForTesting` static). `assets/models/` directory + `.gitkeep` added;
+  `tflite_flutter: ^0.11.0` in pubspec. `TflitePoseDetector` is never imported
+  by any test (no FFI load under `flutter test`). 9 new Dart tests (provider
+  default, Keypoint equality, PoseFrame operator[], MockPoseDetector init/isReady/
+  broadcast/emitFrame/use-after-dispose/multi-subscriber). `flutter analyze` clean,
+  `flutter test` 239/239 green.
 - 2026-06-27 · M7 · App builds + runs with no hardware present, completing M7.
   Added `app/test/sensors/hardware_free_smoke_test.dart`: an end-to-end
   hardware-free smoke test that calls `resolveWorkoutSensorSource()` with real
