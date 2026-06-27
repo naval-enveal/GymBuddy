@@ -1,4 +1,5 @@
 import 'package:gymbuddy/core/pose/pose_detector.dart';
+import 'package:gymbuddy/core/pose/pose_exercise_matching.dart';
 import 'package:gymbuddy/core/pose/pose_rep_counter.dart';
 
 /// Per-exercise joint-angle configurations for pose-based rep counting.
@@ -67,7 +68,11 @@ const Map<String, RepAngleConfig> kExerciseAngleConfigs = {
   ),
 };
 
-/// Returns the [RepAngleConfig] for [exerciseName] (case-insensitive), or
-/// null for exercises without a pose-based rep counting configuration.
-RepAngleConfig? resolveAngleConfig(String exerciseName) =>
-    kExerciseAngleConfigs[exerciseName.toLowerCase()];
+/// Returns the [RepAngleConfig] for [exerciseName], or null for exercises
+/// without a pose-based rep counting configuration. Matching is
+/// case-insensitive and longest-key-wins (see [matchCanonicalKey]), so
+/// descriptive plan names ("Back Squat") resolve to the canonical movement.
+RepAngleConfig? resolveAngleConfig(String exerciseName) {
+  final key = matchCanonicalKey(exerciseName, kExerciseAngleConfigs.keys);
+  return key == null ? null : kExerciseAngleConfigs[key];
+}

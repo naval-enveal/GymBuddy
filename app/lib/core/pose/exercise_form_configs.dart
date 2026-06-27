@@ -1,4 +1,5 @@
 import 'package:gymbuddy/core/pose/pose_detector.dart';
+import 'package:gymbuddy/core/pose/pose_exercise_matching.dart';
 import 'package:gymbuddy/core/pose/pose_form_checker.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 
@@ -81,7 +82,11 @@ const Map<String, List<FormRule>> kExerciseFormConfigs = {
   ],
 };
 
-/// Returns the form rules for [exerciseName] (case-insensitive), or an empty
-/// list for exercises without pose-based form feedback.
-List<FormRule> resolveFormRules(String exerciseName) =>
-    kExerciseFormConfigs[exerciseName.toLowerCase()] ?? const <FormRule>[];
+/// Returns the form rules for [exerciseName], or an empty list for exercises
+/// without pose-based form feedback. Matching is case-insensitive and
+/// longest-key-wins (see [matchCanonicalKey]), so descriptive plan names
+/// ("Dumbbell Romanian Deadlift") resolve to the canonical movement.
+List<FormRule> resolveFormRules(String exerciseName) {
+  final key = matchCanonicalKey(exerciseName, kExerciseFormConfigs.keys);
+  return key == null ? const <FormRule>[] : kExerciseFormConfigs[key]!;
+}

@@ -145,5 +145,23 @@ void main() {
       expect(plank.targetReps, isNull);
       expect(plank.restSeconds, 60);
     });
+
+    test('form-tracking is decided by the pose catalog, not the server flag',
+        () {
+      const workout = PlanWorkout(
+        name: 'Mixed',
+        exercises: <PlanExercise>[
+          // Catalog knows this movement → form-tracked despite the false flag.
+          PlanExercise(name: 'Goblet Squat', formTracked: false),
+          // Catalog can't track this → not form-tracked despite the true flag.
+          PlanExercise(name: 'Front Plank', formTracked: true),
+        ],
+      );
+
+      final session = workout.toSessionPlan();
+
+      expect(session.exercises[0].exercise.formTracked, isTrue);
+      expect(session.exercises[1].exercise.formTracked, isFalse);
+    });
   });
 }

@@ -15,13 +15,46 @@
 
 ## Next up
 **M8 is in progress** on branch `m8-pose` (cut from `dev`). Gate cleared by human
-decision: build mock-first, test on device later. Tasks 1–3 done.
-**Next: task 4 — "Initial mirror/POV-friendly exercise set"**: settle the curated
-set of exercises the glasses can actually track from a first-person view (the
-rep+form coverage in `kExerciseAngleConfigs` / `kExerciseFormConfigs` is the seed)
-and make it the single source of truth the plans/session layers read for which
-exercises are pose-trackable. Then task 5 surfaces form-tracked vs
-rep-tracked-only in the UI.
+decision: build mock-first, test on device later. Tasks 1–4 done.
+**Next: task 5 — "UI marks exercises form-tracked vs rep-tracked-only"** (the last
+M8 task): surface the pose catalog's three-way classification in the plans UI. The
+catalog is now the single source of truth — `poseTrackingFor(name)` in
+`app/lib/core/pose/pose_exercise_catalog.dart` returns a `PoseTracking`
+(`none` / `repsOnly` / `formTracked`); `plan_detail_screen.dart`'s `_TrackingBadge`
+currently keys off the *server* `PlanExercise.formTracked` flag (only two states)
+and should instead read `poseTrackingFor(exercise.name)` so it shows form-tracked
+vs rep-tracked-only vs untracked. When that's done, all M8 tasks are checked —
+open the PR `Milestone M8: pose` from `m8-pose` into `dev` and stop.
+
+Catalog design notes (task 4, done): "which exercises the glasses can track from
+POV" is now one authoritative module, not a server flag the client trusts. Plans
+seed *descriptive* names ("Back Squat", "Dumbbell Romanian Deadlift") while the
+pose configs are keyed by short canonical movements ("squat", "romanian
+deadlift"), so exact lookup matched no real plan exercise. New
+`app/lib/core/pose/pose_exercise_matching.dart`: a pure `matchCanonicalKey(name,
+keys)` — case-insensitive **substring** match, **longest-key-wins** so the
+specific "romanian deadlift" beats the generic "deadlift". New
+`app/lib/core/pose/pose_exercise_catalog.dart`: a `PoseTracking` enum
+(`none`/`repsOnly`/`formTracked`) with an `isPoseTrackable`/`isRepTracked`/
+`isFormTracked` extension, `kPoseTrackableExercises` (the union of the rep
+`kExerciseAngleConfigs` + form `kExerciseFormConfigs` keysets — the curated set),
+`canonicalExerciseKey(name)`, and `poseTrackingFor(name)` (form config →
+`formTracked`, angle-only → `repsOnly`, else `none`). `resolveAngleConfig`/
+`resolveFormRules` now route through `matchCanonicalKey` too, so rep counting,
+form checks, and pose-trackability can never disagree about whether an exercise
+is recognised (existing exact-name + case-insensitive resolver tests stay green —
+an exact key is the longest match). `session_mapper.dart`'s `toSessionPlan()` now
+sets `TrackedExercise.formTracked` from `poseTrackingFor(e.name).isFormTracked`
+(the catalog), **not** the server `PlanExercise.formTracked` flag — so the engine
+(and the `MetaGlassesSensorSource` form-checker wiring it gates) never promises
+form feedback the pose layer has no rules for. Invariant enforced by test: every
+form-config movement also has a rep angle config (form tracking implies rep
+counting). 17 new tests (`pose_exercise_catalog_test.dart`: matcher substring/
+longest-wins/blank, `canonicalExerciseKey` real plan names + unrecognised,
+`poseTrackingFor` form/rep-only/none, capability getters, union set + form⊆angle
+invariant; + 1 in `session_models_test.dart`: catalog overrides the server flag
+both ways). `flutter analyze` clean, `flutter test` 301/301 green (the plans UI
+still reads the server flag — task 5 switches it to the catalog).
 
 Form-check design notes (task 3, done): pose-based form feedback mirrors the
 task-2 rep-counter design — pure-Dart, synchronous, reading the *same* joint
@@ -695,7 +728,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Pose model integrated (tflite_flutter)
 - [x] Rep detection fed by active sensor source
 - [x] Basic joint-angle checks
-- [ ] Initial mirror/POV-friendly exercise set
+- [x] Initial mirror/POV-friendly exercise set
 - [ ] UI marks exercises form-tracked vs rep-tracked-only
 
 ### M9 — AI layer + premium  [HUMAN GATE]  `[ ]`
@@ -717,6 +750,16 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M8 · Initial mirror/POV-friendly exercise set (M8 task 4). New
+  `app/lib/core/pose/pose_exercise_catalog.dart` is the single source of truth for
+  pose-trackability: a `PoseTracking` enum (`none`/`repsOnly`/`formTracked`),
+  `kPoseTrackableExercises` (union of the rep + form config keysets), and
+  `poseTrackingFor(name)`. New `pose_exercise_matching.dart` — a pure
+  `matchCanonicalKey` (case-insensitive substring, longest-key-wins) so descriptive
+  plan names ("Back Squat", "Dumbbell Romanian Deadlift") resolve to the canonical
+  movements; `resolveAngleConfig`/`resolveFormRules` now route through it too.
+  `session_mapper.dart` sets `TrackedExercise.formTracked` from the catalog, not the
+  server flag. 18 new tests. `flutter analyze` clean, `flutter test` 301/301.
 - 2026-06-27 · M8 · Basic joint-angle form checks (M8 task 3). New
   `app/lib/core/pose/pose_form_checker.dart` — `FormRule` (a joint-angle band +
   severity/message) and `PoseFormChecker` (edge-triggered fault detector reading
