@@ -14,24 +14,10 @@
 ---
 
 ## Next up
-**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–6 are done:
-both native sides mirror the `gymbuddy/glasses` wire contract, the Dart
-`MetaGlassesSensorSource` binds to those channels, the composition root probes the
-glasses once and falls back to `MockSensorSource` when they're unavailable, the
-first *output* path (`playCue` audio over the speakers) is wired end to end, and
-the second *input* path (the mic-based wake trigger for Q&A) is now wired through
-the same seam. **Next: task 7 — "App builds + runs with no hardware present"**, the
-last M7 task. This is largely an *audit/confirmation* task: every layer was built
-mock-first, so the app already resolves `MockSensorSource` whenever the glasses
-report `unavailable` (every headless build). Confirm `flutter analyze` +
-`flutter test` stay green, that `resolveWorkoutSensorSource` falls back cleanly,
-and that no feature code assumes hardware (the guardrail). Note the native build
-can't be compiled headless (no Android SDK / Xcode), so the verifiable gate stays
-the Dart side. Consider whether an explicit "hardware-free smoke" test or doc note
-is warranted, or whether the existing resolver/mock tests already discharge it —
-if so, just check the box. When task 7 is checked, **M7 is fully complete**: open a
-PR from `m7-glasses` into `dev` titled "Milestone M7: glasses" and stop for human
-review (don't merge, don't cut M8).
+**M7 is complete** — PR opened from `m7-glasses` into `dev` for human review.
+All 7 tasks are done. **Do not merge and do not cut M8 until the PR is reviewed.**
+M8 is tagged `[HARDWARE-REQUIRED]` (no `[GATE CLEARED]`) and M9 is `[HUMAN GATE]`;
+both require a human to clear the gate before autonomous work can resume.
 
 Wake-trigger design notes (task 6, done): the second *input* path from the
 glasses — a control signal, not a tracking one. The mic listens for a fixed wake
@@ -656,14 +642,14 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Manual rep/weight logging fallback
 - [x] Post-workout summary syncs to WorkoutLog
 
-### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
+### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[x]`
 - [x] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
 - [x] iOS (Swift) platform channel wrapping DAT SDK
 - [x] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
 - [x] Capability detection + fallback to MockSensorSource
 - [x] Audio cue playback through glasses speakers
 - [x] Custom mic-based wake trigger for Q&A
-- [ ] App builds + runs with no hardware present
+- [x] App builds + runs with no hardware present
 
 ### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  `[ ]`
 - [ ] Pose model integrated (tflite_flutter)
@@ -691,6 +677,17 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · App builds + runs with no hardware present, completing M7.
+  Added `app/test/sensors/hardware_free_smoke_test.dart`: an end-to-end
+  hardware-free smoke test that calls `resolveWorkoutSensorSource()` with real
+  defaults (no factory injection), confirms the resolver falls back to
+  `MockSensorSource` when the glasses channel is unregistered
+  (`MissingPluginException`), then drives a full session lifecycle — `connect`,
+  capability read, `startTracking`, `emitRep`/`emitFormCue`/`emitWake`, `playCue`
+  (safe no-op without speakers), `stopTracking` — against the mock. Proves the
+  resolved source is actually drivable end to end with no hardware, which is what
+  "runs with no hardware" means. `flutter analyze` clean, `flutter test` 229/229
+  green (native isn't compilable headless — the Dart gate is verified).
 - 2026-06-27 · M7 · Custom mic-based wake trigger for Q&A — the second *input*
   path from the glasses, a control signal (not a tracking one). The always-on mic
   listens for a fixed wake phrase (`kWakePhrase` = "hey buddy") and pushes a
