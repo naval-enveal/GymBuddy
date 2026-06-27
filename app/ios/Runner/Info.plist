@@ -70,5 +70,11 @@
 	<string>GymBuddy reads your resting heart rate, HRV, sleep, and steps to show your daily readiness and tailor your training.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>GymBuddy can record completed workouts to Apple Health.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>GymBuddy connects to your Meta glasses over Bluetooth so they can count reps and watch your form during a workout.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>GymBuddy uses your Meta glasses' camera to watch your reps and form while you train.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>GymBuddy uses your Meta glasses' microphone for hands-free voice questions during a workout.</string>
 </dict>
 </plist>

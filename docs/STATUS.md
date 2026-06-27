@@ -14,15 +14,61 @@
 ---
 
 ## Next up
-**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Task 1 (Android
-Kotlin platform channel) is done. **Next: task 2 — iOS (Swift) platform channel
-wrapping DAT SDK.** Mirror the Android wire contract exactly (see the Android
-design notes below): the same channel/method names and event payload shapes, the
-same graceful-absence posture (no DAT SDK bundled ⇒ `connect` resolves to
-`unavailable`, no events) so the app builds and runs with no hardware. M7 tasks
-must run without hardware (MockSensorSource fallback). Note: native Kotlin/Swift
-can't be compiled in this headless env (no Android SDK / Xcode) — the verifiable
-gate stays `flutter analyze` + `flutter test`, same as the prior native tasks.
+**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–2 (Android
+Kotlin + iOS Swift platform channels) are done; both native sides now mirror the
+same `gymbuddy/glasses` wire contract. **Next: task 3 — `MetaGlassesSensorSource`
+implements `WorkoutSensorSource`.** This is the Dart side: a new
+`app/lib/sensors/meta_glasses_sensor_source.dart` that talks to the platform
+channels (`MethodChannel('gymbuddy/glasses')` for connect/startTracking/
+stopTracking/dispose; `EventChannel('gymbuddy/glasses/reps')` →
+`Stream<RepEvent>` and `EventChannel('gymbuddy/glasses/formCues')` →
+`Stream<FormCue>`, decoding the maps the native sides send). Map the channel
+results onto the existing `sensor_source.dart` value types: `connect` returns
+`{availability, capabilities:{repCounting, formTracking}}` → `SensorAvailability`
++ `SensorCapabilities`; the reps event `{index, timestampMs, confidence?}` →
+`RepEvent` (timestamp from `timestampMs`); the form event `{severity, message}` →
+`FormCue` over `FormSeverity` (good/minor/major). Keep the streams broadcast.
+Unit-test it by injecting fakes for the method/event channels (Flutter's
+`TestDefaultBinaryMessengerBinding` can mock both) — no hardware needed. The
+capability-detection + MockSensorSource fallback wiring is the *following* task
+(task 4), so this task just needs the source to surface `unavailable` faithfully
+when the native `connect` says so. Note: native Kotlin/Swift can't be compiled in
+this headless env (no Android SDK / Xcode) — the verifiable gate stays
+`flutter analyze` + `flutter test`.
+
+iOS glasses-channel design notes (this task, done): the iOS side of the glasses
+platform channel lives in `app/ios/Runner/Glasses/`, mirroring the Android wire
+contract exactly. `DatSdkClient.swift` is the seam over Meta's DAT SDK — a
+protocol (`connect`/`capabilities`/`startTracking`/`stopTracking`/`dispose` + a
+`TrackingListener` for rep/form callbacks) with a `DatSdkClientFactory.create()`
+that detects the SDK **reflectively** (`NSClassFromString("MetaWearablesDAT.
+DeviceAccessToolkit")`, nil ⇒ absent) and returns `UnavailableDatSdkClient`
+(connects to nothing, no capabilities, emits no events) whenever it's missing —
+which is every build until the SDK framework is vendored — so the Dart layer
+reads `unavailable` and falls back to `MockSensorSource`. `DatSdkAvailableClient`
+is the real path, instantiated only when the SDK is present; until its
+camera/audio/mic streams are confirmed live it conservatively reports
+`unavailable` (integration TODOs inline; M8 feeds the pose pipeline through
+`startTracking`). `GlassesChannel.swift` bridges the control `FlutterMethodChannel`
+**`gymbuddy/glasses`** (`connect` → `{availability, capabilities:{repCounting,
+formTracking}}`, `startTracking {name, formTracked}`, `stopTracking`, `dispose`)
+and the two `FlutterEventChannel`s **`gymbuddy/glasses/reps`** (`{index,
+timestampMs, confidence?}`) and **`gymbuddy/glasses/formCues`** (`{severity,
+message}`) to the client, dispatching every sink emission onto the main queue
+(Flutter sinks require the platform thread) via a small `QueuingStreamHandler`
+that holds the active sink between `onListen`/`onCancel` (the Swift mirror of the
+Android nullable `EventSink?`); `dispose()` clears the handlers + the client.
+Wired in `AppDelegate.didInitializeImplicitFlutterEngine` (a per-plugin registrar
+supplies the binary messenger), torn down in `applicationWillTerminate`. Both new
+Swift files were registered in `Runner.xcodeproj/project.pbxproj` (file refs +
+build files + a `Glasses` group + Sources phase entries) since the project isn't
+file-system-synchronized. `Info.plist` gained `NSBluetoothAlwaysUsageDescription`
+/ `NSCameraUsageDescription` / `NSMicrophoneUsageDescription` (the iOS analogues
+of the Android `BLUETOOTH_CONNECT`/`CAMERA`/`RECORD_AUDIO` manifest perms — the
+DAT SDK pairs over BLE and streams the glasses' POV camera+mic). Native Swift
+can't be compiled headless (no Xcode), so the verifiable gate is the Dart side:
+`flutter analyze` clean, `flutter test` 199/199 green (no Dart changed — confirms
+no regression).
 
 Android glasses-channel design notes (this task, done): the Android side of the
 glasses platform channel lives in
@@ -501,7 +547,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
 - [x] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
-- [ ] iOS (Swift) platform channel wrapping DAT SDK
+- [x] iOS (Swift) platform channel wrapping DAT SDK
 - [ ] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
 - [ ] Capability detection + fallback to MockSensorSource
 - [ ] Audio cue playback through glasses speakers
@@ -534,6 +580,31 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · iOS (Swift) platform channel wrapping the DAT SDK, mirroring
+  the Android wire contract. New `app/ios/Runner/Glasses/`: `DatSdkClient.swift`
+  is the native seam over Meta's DAT SDK — a protocol
+  (`connect`/`capabilities`/`startTracking`/`stopTracking`/`dispose` + a
+  `TrackingListener` for rep/form callbacks) whose `DatSdkClientFactory.create()`
+  detects the SDK **reflectively** (`NSClassFromString`, it's Meta-proprietary and
+  not a compile-time dep) and returns an `UnavailableDatSdkClient` (no connection,
+  no capabilities, no events) whenever it's absent — every build until the SDK
+  framework is vendored — so the Dart layer reads `unavailable` and falls back to
+  `MockSensorSource`, keeping the app buildable/runnable with no hardware.
+  `GlassesChannel.swift` exposes the identical contract to the Android side:
+  control `FlutterMethodChannel` `gymbuddy/glasses` (`connect` → availability +
+  capabilities, `startTracking {name, formTracked}`, `stopTracking`, `dispose`)
+  plus event channels `gymbuddy/glasses/reps` (`{index, timestampMs, confidence?}`)
+  and `gymbuddy/glasses/formCues` (`{severity, message}`), dispatching sink
+  emissions onto the main queue via a small `QueuingStreamHandler` (the Swift
+  mirror of the Android nullable `EventSink?`). Wired in
+  `AppDelegate.didInitializeImplicitFlutterEngine` (a per-plugin registrar
+  supplies the messenger), torn down in `applicationWillTerminate`. Both Swift
+  files were registered in `Runner.xcodeproj/project.pbxproj` (the project isn't
+  file-system-synchronized); `Info.plist` gained the Bluetooth/Camera/Microphone
+  usage strings (the iOS analogues of the Android BLE/camera/mic perms for the
+  BLE-paired POV camera/mic). Native Swift isn't compilable headless (no Xcode),
+  so the verifiable gate is the Dart side: `flutter analyze` clean, `flutter test`
+  199/199 green (no Dart changed — confirms no regression).
 - 2026-06-27 · M7 · Android (Kotlin) platform channel wrapping the DAT SDK
   (camera/audio/mic), starting M7 on branch `m7-glasses`. New
   `app/android/app/src/main/kotlin/com/gymbuddy/gymbuddy/glasses/`:
