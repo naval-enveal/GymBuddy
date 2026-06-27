@@ -14,27 +14,56 @@
 ---
 
 ## Next up
-**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–2 (Android
-Kotlin + iOS Swift platform channels) are done; both native sides now mirror the
-same `gymbuddy/glasses` wire contract. **Next: task 3 — `MetaGlassesSensorSource`
-implements `WorkoutSensorSource`.** This is the Dart side: a new
-`app/lib/sensors/meta_glasses_sensor_source.dart` that talks to the platform
-channels (`MethodChannel('gymbuddy/glasses')` for connect/startTracking/
-stopTracking/dispose; `EventChannel('gymbuddy/glasses/reps')` →
-`Stream<RepEvent>` and `EventChannel('gymbuddy/glasses/formCues')` →
-`Stream<FormCue>`, decoding the maps the native sides send). Map the channel
-results onto the existing `sensor_source.dart` value types: `connect` returns
-`{availability, capabilities:{repCounting, formTracking}}` → `SensorAvailability`
-+ `SensorCapabilities`; the reps event `{index, timestampMs, confidence?}` →
-`RepEvent` (timestamp from `timestampMs`); the form event `{severity, message}` →
-`FormCue` over `FormSeverity` (good/minor/major). Keep the streams broadcast.
-Unit-test it by injecting fakes for the method/event channels (Flutter's
-`TestDefaultBinaryMessengerBinding` can mock both) — no hardware needed. The
-capability-detection + MockSensorSource fallback wiring is the *following* task
-(task 4), so this task just needs the source to surface `unavailable` faithfully
-when the native `connect` says so. Note: native Kotlin/Swift can't be compiled in
-this headless env (no Android SDK / Xcode) — the verifiable gate stays
-`flutter analyze` + `flutter test`.
+**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–3 are done:
+both native sides mirror the `gymbuddy/glasses` wire contract, and the Dart
+`MetaGlassesSensorSource` now binds to those channels. **Next: task 4 —
+capability detection + fallback to `MockSensorSource`.** This rewires
+`workoutSensorSourceProvider` (currently a hard-coded `MockSensorSource` in
+`sensor_source.dart`) so the app picks the real source when the glasses are
+present and silently falls back to the mock otherwise. The seam to build on:
+`MetaGlassesSensorSource.connect()` already returns
+`SensorAvailability.unavailable` (and empty `capabilities`) whenever the native
+`connect` reports no SDK / throws / the channel is unregistered — so the
+detection step is just: construct the glasses source, `connect()`, and if the
+result is `unavailable`, dispose it and hand back a `MockSensorSource` instead
+(otherwise keep the glasses source). Because the provider is synchronous today,
+this likely means an async resolver (e.g. a small `FutureProvider`/`AsyncNotifier`
+that performs the `connect()` probe once, or an override installed at the
+composition root in `main.dart` after probing — mirror how `main.dart` already
+overrides `vitalsReaderProvider`/`healthPermissionServiceProvider`). Whatever the
+shape, the workout session controller must keep working unchanged against
+whichever source it's handed, and the whole thing must still build + run with no
+hardware (every test runs against the mock). Note: native Kotlin/Swift can't be
+compiled in this headless env (no Android SDK / Xcode) — the verifiable gate
+stays `flutter analyze` + `flutter test`.
+
+MetaGlassesSensorSource design notes (task 3, done): the real glasses-backed
+`WorkoutSensorSource` lives in `app/lib/sensors/meta_glasses_sensor_source.dart`
+— a thin Dart binding over the platform channels the Kotlin/Swift sides expose,
+owning no rep/form logic of its own. Channel-name constants
+(`kGlassesMethodChannel` = `gymbuddy/glasses`, `kGlassesRepsChannel`,
+`kGlassesFormCuesChannel`) are exported so the fallback layer + tests share them.
+The constructor takes optional `MethodChannel`/`EventChannel`s (defaulting to the
+named ones) for injection. `connect()` calls `invokeMapMethod('connect')`, stores
+`capabilities` from `{repCounting, formTracking}`, and returns `available` only
+when `availability == 'available'` — any `PlatformException`/
+`MissingPluginException` (no SDK, unregistered channel) degrades to `unavailable`
+with empty capabilities (the same graceful posture as the health layer), so the
+source surfaces `unavailable` faithfully. `capabilities` is conservatively empty
+until `connect()` runs. `startTracking` forwards `{name, formTracked}`;
+`stopTracking`/`dispose` invoke their methods (`dispose` is idempotent and
+swallows native failures). `reps`/`formCues` are lazily-cached broadcast streams
+that `map` each `EventChannel.receiveBroadcastStream()` onto `RepEvent`
+(`timestamp` from `timestampMs` via `fromMillisecondsSinceEpoch`) /`FormCue`
+(`severity` name → `FormSeverity`, unknown → `minor` so a cue is never dropped).
+Use-after-`dispose` throws `StateError` (parity with the mock). 14 tests
+(`test/sensors/meta_glasses_sensor_source_test.dart`) drive both channel kinds via
+`TestDefaultBinaryMessenger` (`setMockMethodCallHandler` + `setMockStreamHandler`/
+`MockStreamHandler.inline`) — no hardware: connect available/unavailable/partial-
+caps/throws→unavailable/empty-before-connect, lifecycle forwarding + idempotent
+dispose + use-after-dispose throws, rep decode + broadcast, form severity decode +
+unknown→minor + broadcast. `flutter analyze` clean, `flutter test` 213/213 green.
+The native channels still can't be compiled headless — the Dart gate is verified.
 
 iOS glasses-channel design notes (this task, done): the iOS side of the glasses
 platform channel lives in `app/ios/Runner/Glasses/`, mirroring the Android wire
@@ -548,7 +577,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
 - [x] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
 - [x] iOS (Swift) platform channel wrapping DAT SDK
-- [ ] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
+- [x] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
 - [ ] Capability detection + fallback to MockSensorSource
 - [ ] Audio cue playback through glasses speakers
 - [ ] Custom mic-based wake trigger for Q&A
@@ -580,6 +609,26 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · `MetaGlassesSensorSource` — the Dart binding that implements
+  `WorkoutSensorSource` over the glasses platform channels. New
+  `app/lib/sensors/meta_glasses_sensor_source.dart` talks to the control
+  `MethodChannel('gymbuddy/glasses')` (connect/startTracking/stopTracking/dispose)
+  and decodes the two `EventChannel`s (`gymbuddy/glasses/reps` →
+  `Stream<RepEvent>`, timestamp from `timestampMs`; `gymbuddy/glasses/formCues` →
+  `Stream<FormCue>` over `FormSeverity`, unknown severity → `minor` so a cue is
+  never dropped) onto the existing `sensor_source.dart` value types. `connect()`
+  maps `{availability, capabilities:{repCounting, formTracking}}` and degrades to
+  `unavailable` with empty capabilities on any `PlatformException`/
+  `MissingPluginException` (no SDK / unregistered channel) — the same graceful
+  posture as the health layer — so the source surfaces `unavailable` faithfully
+  for the M7 task-4 fallback. The rep/form streams are lazily-cached broadcast
+  streams; `dispose` is idempotent; use-after-dispose throws (parity with the
+  mock). Channel names are exported as constants for the fallback layer + tests.
+  14 tests (`test/sensors/meta_glasses_sensor_source_test.dart`) drive both
+  channel kinds through `TestDefaultBinaryMessenger`
+  (`setMockMethodCallHandler` + `setMockStreamHandler`) with no hardware.
+  `flutter analyze` clean, `flutter test` 213/213 green (native channels aren't
+  compilable headless, so the Dart gate is what's verified).
 - 2026-06-27 · M7 · iOS (Swift) platform channel wrapping the DAT SDK, mirroring
   the Android wire contract. New `app/ios/Runner/Glasses/`: `DatSdkClient.swift`
   is the native seam over Meta's DAT SDK — a protocol
