@@ -15,8 +15,10 @@
 
 ## Next up
 **M8 is complete** on branch `m8-pose` (cut from `dev`). All five tasks are
-checked. A PR `Milestone M8: pose` has been opened from `m8-pose` into `dev` —
-awaiting human review + merge. Do not merge, do not cut the next branch.
+checked and pushed to `origin/m8-pose`. **ACTION NEEDED: open the PR
+`Milestone M8: pose` from `m8-pose` into `dev` manually** — the autonomous run
+could not open it because `gh` is not authenticated in this environment
+(`gh auth login` / no `GH_TOKEN`). Do not merge, do not cut the next branch.
 **After the merge, M9 (AI layer + premium) is next** — but it is tagged
 `[HUMAN GATE]` and not yet `[GATE CLEARED]`, so the next autonomous run must
 print `HUMAN_GATE: M9` and stop until a human clears the gate.
