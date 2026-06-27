@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:gymbuddy/core/pose/exercise_angle_configs.dart';
+import 'package:gymbuddy/core/pose/exercise_form_configs.dart';
 import 'package:gymbuddy/core/pose/pose_detector.dart';
+import 'package:gymbuddy/core/pose/pose_form_checker.dart';
 import 'package:gymbuddy/core/pose/pose_rep_counter.dart';
 import 'package:gymbuddy/core/pose/tflite_pose_detector.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
@@ -75,6 +77,14 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
       onListen: _startNativeRepsSub,
       onCancel: _stopNativeRepsSub,
     );
+
+    // Same shape for form cues: native cues (if the SDK ever emits any) are
+    // merged in on first listen, and pose-derived form cues are pushed into the
+    // same controller from [startTracking] via a [PoseFormChecker].
+    _formCuesController = StreamController<FormCue>.broadcast(
+      onListen: _startNativeFormCuesSub,
+      onCancel: _stopNativeFormCuesSub,
+    );
   }
 
   final MethodChannel _methods;
@@ -84,23 +94,27 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   final EventChannel _cameraChannel;
   late final PoseDetector _poseDetector;
   late final StreamController<RepEvent> _repsController;
+  late final StreamController<FormCue> _formCuesController;
 
   /// Populated by [connect] from the native handshake; conservatively empty
   /// until then so capability-gated UI never shows before we've connected.
   SensorCapabilities _capabilities =
       const SensorCapabilities(repCounting: false, formTracking: false);
 
-  Stream<FormCue>? _formCues;
   Stream<WakeEvent>? _wake;
   Stream<PoseInput>? _cameraFrames;
   bool _disposed = false;
 
-  // Native rep channel subscription — active only while [reps] has listeners.
+  // Native rep/form channel subscriptions — active only while their stream has
+  // listeners.
   StreamSubscription<dynamic>? _nativeRepsSub;
+  StreamSubscription<dynamic>? _nativeFormCuesSub;
 
-  // Pose-based rep counting — per-set state, wired in [startTracking].
+  // Pose-based rep counting + form checking — per-set state, wired in
+  // [startTracking] and driven off the one pose-frame subscription.
   StreamSubscription<PoseFrame>? _poseFramesSub;
   PoseRepCounter? _repCounter;
+  PoseFormChecker? _formChecker;
 
   @override
   SensorCapabilities get capabilities => _capabilities;
@@ -120,8 +134,7 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   Stream<RepEvent> get reps => _repsController.stream;
 
   @override
-  Stream<FormCue> get formCues =>
-      _formCues ??= _formCuesChannel.receiveBroadcastStream().map(_decodeFormCue);
+  Stream<FormCue> get formCues => _formCuesController.stream;
 
   @override
   Stream<WakeEvent> get wakeEvents =>
@@ -168,24 +181,44 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     await _poseFramesSub?.cancel();
     _poseFramesSub = null;
     _repCounter = null;
+    _formChecker = null;
 
     await _methods.invokeMethod<void>('startTracking', <String, Object?>{
       'name': exercise.name,
       'formTracked': exercise.formTracked,
     });
 
-    // Wire pose-based rep counting if we have an angle config for this exercise
-    // and the model is loaded. Silently skipped when pose isn't ready yet.
-    final config = resolveAngleConfig(exercise.name);
-    if (config != null && _poseDetector.isReady) {
-      final counter = PoseRepCounter(config);
-      _repCounter = counter;
-      _poseFramesSub = _poseDetector.frames.listen((frame) {
-        final ts = frame.timestamp ?? DateTime.now();
-        final event = counter.processFrame(frame, ts);
+    // Everything below needs the on-device model loaded; if it isn't, the rep
+    // path falls back to native/mock and no pose-derived cues fire.
+    if (!_poseDetector.isReady) return;
+
+    // Pose-based rep counting if we have an angle config for this exercise.
+    final repConfig = resolveAngleConfig(exercise.name);
+    final repCounter = repConfig == null ? null : PoseRepCounter(repConfig);
+    _repCounter = repCounter;
+
+    // Pose-based form feedback only when the exercise is form-tracked (the
+    // glasses are POV, so form is attempted only for visible movements) and we
+    // have rules for it.
+    final formRules =
+        exercise.formTracked ? resolveFormRules(exercise.name) : const <FormRule>[];
+    final formChecker = formRules.isEmpty ? null : PoseFormChecker(formRules);
+    _formChecker = formChecker;
+
+    if (repCounter == null && formChecker == null) return;
+
+    _poseFramesSub = _poseDetector.frames.listen((frame) {
+      final ts = frame.timestamp ?? DateTime.now();
+      if (repCounter != null) {
+        final event = repCounter.processFrame(frame, ts);
         if (event != null) _repsController.add(event);
-      });
-    }
+      }
+      if (formChecker != null) {
+        for (final cue in formChecker.processFrame(frame)) {
+          _formCuesController.add(cue);
+        }
+      }
+    });
   }
 
   @override
@@ -195,6 +228,8 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     _poseFramesSub = null;
     _repCounter?.reset();
     _repCounter = null;
+    _formChecker?.reset();
+    _formChecker = null;
     await _methods.invokeMethod<void>('stopTracking');
   }
 
@@ -221,7 +256,9 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     await _poseFramesSub?.cancel();
     _poseFramesSub = null;
     _stopNativeRepsSub();
+    _stopNativeFormCuesSub();
     await _repsController.close();
+    await _formCuesController.close();
     await _poseDetector.dispose();
     try {
       await _methods.invokeMethod<void>('dispose');
@@ -242,6 +279,18 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   void _stopNativeRepsSub() {
     _nativeRepsSub?.cancel();
     _nativeRepsSub = null;
+  }
+
+  void _startNativeFormCuesSub() {
+    _nativeFormCuesSub = _formCuesChannel
+        .receiveBroadcastStream()
+        .map(_decodeFormCue)
+        .listen(_formCuesController.add);
+  }
+
+  void _stopNativeFormCuesSub() {
+    _nativeFormCuesSub?.cancel();
+    _nativeFormCuesSub = null;
   }
 
   RepEvent _decodeRepEvent(dynamic event) {

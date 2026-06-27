@@ -24,6 +24,24 @@ PoseFrame _squatFrame(double angleDeg) {
   );
 }
 
+/// Builds a PoseFrame with a leftShoulder–leftHip–leftKnee (torso) angle of
+/// [angleDeg] — drives the squat forward-lean form rule.
+PoseFrame _torsoFrame(double angleDeg) {
+  final rad = angleDeg * math.pi / 180;
+  return PoseFrame(
+    keypoints: [
+      const Keypoint(id: KeypointId.leftShoulder, x: 0, y: 1, confidence: 0.9),
+      const Keypoint(id: KeypointId.leftHip, x: 0, y: 0, confidence: 0.9),
+      Keypoint(
+        id: KeypointId.leftKnee,
+        x: math.sin(rad),
+        y: math.cos(rad),
+        confidence: 0.9,
+      ),
+    ],
+  );
+}
+
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = binding.defaultBinaryMessenger;
@@ -540,6 +558,104 @@ void main() {
       pose.emitFrame(_squatFrame(160));
       await Future<void>.delayed(Duration.zero);
       expect(reps, isEmpty);
+    });
+  });
+
+  group('pose-based form cues', () {
+    test('emits a form cue when a form-tracked exercise breaks form', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: true),
+      );
+
+      // A torso angle of 30° (< the 45° squat threshold) is a forward-lean fault.
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, hasLength(1));
+      expect(cues.single.severity, FormSeverity.minor);
+      expect(cues.single.message, contains('chest up'));
+    });
+
+    test('a held fault is edge-triggered into a single cue', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: true),
+      );
+
+      pose.emitFrame(_torsoFrame(30));
+      pose.emitFrame(_torsoFrame(25));
+      pose.emitFrame(_torsoFrame(35));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, hasLength(1));
+    });
+
+    test('emits no form cue when the exercise is not form-tracked', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: false),
+      );
+
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, isEmpty);
+    });
+
+    test('emits no form cue for an exercise without form rules', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'bicep curl', formTracked: true),
+      );
+
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, isEmpty);
+    });
+
+    test('form cues stop flowing after stopTracking', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: true),
+      );
+      await source.stopTracking();
+
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, isEmpty);
     });
   });
 }

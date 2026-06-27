@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:gymbuddy/core/pose/pose_detector.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 
@@ -83,29 +81,12 @@ class PoseRepCounter {
     _phase = _RepPhase.top;
   }
 
-  double? _measureAngle(PoseFrame frame) {
-    final pivot = frame[config.pivot];
-    final from = frame[config.from];
-    final to = frame[config.to];
-    if (pivot == null || from == null || to == null) return null;
-    if (pivot.confidence < config.minConfidence) return null;
-    if (from.confidence < config.minConfidence) return null;
-    if (to.confidence < config.minConfidence) return null;
-    return _angleDeg(from, pivot, to);
-  }
+  double? _measureAngle(PoseFrame frame) => frame.angleDegrees(
+        config.from,
+        config.pivot,
+        config.to,
+        minConfidence: config.minConfidence,
+      );
 }
 
 enum _RepPhase { top, bottom }
-
-/// Returns the angle in degrees at [pivot] formed by [a]-[pivot]-[b].
-double _angleDeg(Keypoint a, Keypoint pivot, Keypoint b) {
-  final dx1 = a.x - pivot.x;
-  final dy1 = a.y - pivot.y;
-  final dx2 = b.x - pivot.x;
-  final dy2 = b.y - pivot.y;
-  final mag1 = math.sqrt(dx1 * dx1 + dy1 * dy1);
-  final mag2 = math.sqrt(dx2 * dx2 + dy2 * dy2);
-  if (mag1 == 0 || mag2 == 0) return 0;
-  final cos = ((dx1 * dx2 + dy1 * dy2) / (mag1 * mag2)).clamp(-1.0, 1.0);
-  return math.acos(cos) * 180 / math.pi;
-}

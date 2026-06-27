@@ -15,11 +15,49 @@
 
 ## Next up
 **M8 is in progress** on branch `m8-pose` (cut from `dev`). Gate cleared by human
-decision: build mock-first, test on device later. Tasks 1–2 done.
-**Next: task 3 — "Basic joint-angle checks"**: add form-feedback logic that uses
-the same keypoint angles from `PoseRepCounter` to detect common form faults
-(e.g. knee caving on squat, back rounding on deadlift) and emit `FormCue`s
-through `MetaGlassesSensorSource.formCues`.
+decision: build mock-first, test on device later. Tasks 1–3 done.
+**Next: task 4 — "Initial mirror/POV-friendly exercise set"**: settle the curated
+set of exercises the glasses can actually track from a first-person view (the
+rep+form coverage in `kExerciseAngleConfigs` / `kExerciseFormConfigs` is the seed)
+and make it the single source of truth the plans/session layers read for which
+exercises are pose-trackable. Then task 5 surfaces form-tracked vs
+rep-tracked-only in the UI.
+
+Form-check design notes (task 3, done): pose-based form feedback mirrors the
+task-2 rep-counter design — pure-Dart, synchronous, reading the *same* joint
+angles. New `app/lib/core/pose/pose_form_checker.dart`: `FormRule`
+(`{id, pivot, from, to, minAngle, maxAngle, severity, message, minConfidence}`,
+asserts `minAngle <= maxAngle`) describes one joint-angle band — a measured angle
+outside `[minAngle, maxAngle]` is a fault — and `PoseFormChecker(List<FormRule>)`
+is an **edge-triggered** state machine: `processFrame(frame)` returns the cues
+that *newly* fired this frame (a held fault yields one cue, not one per frame,
+tracked via a `Set<String>` of active rule ids), can fire again after recovering
+into the good band, leaves a rule's state untouched when its keypoints are
+missing/low-confidence, and `reset()` clears state per set. The angle math that
+was private to `PoseRepCounter` (`_angleDeg`) moved to a shared
+`PoseFrame.angleDegrees(from, pivot, to, {minConfidence})` on
+`pose_landmarks.dart` (returns null on absent/low-confidence keypoints); the rep
+counter now reads it too, so rep counting and form checks gate on confidence
+identically. New `app/lib/core/pose/exercise_form_configs.dart`:
+`kExerciseFormConfigs` (squat/lunge forward-lean via the shoulder–hip–knee torso
+angle; deadlift/romanian-deadlift back-rounding via the ear–shoulder–hip spine
+line; push-up hip-sag) and `resolveFormRules(name)` (case-insensitive, empty list
+for unknowns) — thresholds approximate, calibrated on-device later.
+`MetaGlassesSensorSource.formCues` is now a broadcast `StreamController<FormCue>`
+(mirroring task-2's `reps`): native form cues (if the SDK ever emits any) merge in
+on first listen, and `startTracking` — when the exercise is `formTracked`, pose is
+ready, and rules exist — wires a `PoseFormChecker` driven off the **one** pose
+frame subscription (shared with the rep counter), pushing each cue into the
+controller; `stopTracking` resets it, `dispose` closes the controller. Gated on
+`formTracked` so non-form exercises emit nothing (the POV form-only contract).
+21 new tests (15 `pose_form_checker_test.dart`: `FormRule` assert + minConfidence
+default, checker good-band/fault/upper-bound/edge-trigger/recovery/low-confidence/
+absent-keypoint/multi-rule/reset, `resolveFormRules` known+case-insensitive/empty/
+coverage+message/unique-ids; 6 `meta_glasses_sensor_source_test.dart`: fault emits
+a cue, held fault edge-triggered to one, no cue when not form-tracked, no cue for
+an exercise without rules, cues stop after `stopTracking`). `flutter analyze`
+clean, `flutter test` 288/288 green (native isn't compilable headless — the Dart
+gate is what's verified).
 
 Wake-trigger design notes (task 6, done): the second *input* path from the
 glasses — a control signal, not a tracking one. The mic listens for a fixed wake
@@ -656,7 +694,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
 - [x] Pose model integrated (tflite_flutter)
 - [x] Rep detection fed by active sensor source
-- [ ] Basic joint-angle checks
+- [x] Basic joint-angle checks
 - [ ] Initial mirror/POV-friendly exercise set
 - [ ] UI marks exercises form-tracked vs rep-tracked-only
 
@@ -679,6 +717,18 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M8 · Basic joint-angle form checks (M8 task 3). New
+  `app/lib/core/pose/pose_form_checker.dart` — `FormRule` (a joint-angle band +
+  severity/message) and `PoseFormChecker` (edge-triggered fault detector reading
+  the same angles as `PoseRepCounter`; one cue per fault, re-fires after recovery,
+  `reset()` per set). Angle math extracted to a shared
+  `PoseFrame.angleDegrees(from, pivot, to, {minConfidence})`; the rep counter now
+  reads it too. New `exercise_form_configs.dart` — `kExerciseFormConfigs`
+  (squat/lunge forward-lean, deadlift/RDL back-rounding, push-up hip-sag) +
+  `resolveFormRules`. `MetaGlassesSensorSource.formCues` is now a broadcast
+  controller; `startTracking` wires a `PoseFormChecker` off the shared pose-frame
+  subscription, gated on `formTracked`, pushing pose-derived cues through it.
+  21 new tests. `flutter analyze` clean, `flutter test` 288/288 green.
 - 2026-06-27 · M8 · Rep detection fed by active sensor source (M8 task 2).
   New `app/lib/core/pose/pose_rep_counter.dart` — `RepAngleConfig` (pivot/from/to
   keypoints + low/high angle thresholds + minConfidence) and `PoseRepCounter`
