@@ -163,4 +163,32 @@ void main() {
       expect(find.text('0:00'), findsOneWidget);
     });
   });
+
+  group('Sparkline', () {
+    testWidgets('renders a multi-point series without error', (tester) async {
+      await tester.pumpWidget(
+        _host(const Sparkline(values: [1, 4, 2, 8, 5])),
+      );
+
+      expect(find.byType(Sparkline), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('handles fewer than two points without error', (tester) async {
+      await tester.pumpWidget(_host(const Sparkline(values: [5])));
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(_host(const Sparkline(values: [])));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('handles a constant series without dividing by zero',
+        (tester) async {
+      await tester.pumpWidget(
+        _host(const Sparkline(values: [7, 7, 7, 7])),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/design/design.dart';
-import 'package:gymbuddy/core/health/vitals_reader.dart';
 import 'package:gymbuddy/features/vitals/vitals_controller.dart';
 import 'package:gymbuddy/features/vitals/vitals_permission_gate.dart';
 
@@ -42,7 +41,7 @@ class _VitalsDashboard extends ConsumerWidget {
         key: Key('vitals-loading'),
         child: CircularProgressIndicator(),
       ),
-      error: (_, __) => _DashboardError(
+      error: (_, _) => _DashboardError(
         onRetry: () => ref.invalidate(vitalsControllerProvider),
       ),
       data: (snapshot) => _DashboardBody(
@@ -165,10 +164,9 @@ class _DashboardBody extends StatelessWidget {
     );
   }
 
-  static String? _whole(double? v) => v == null ? null : v.round().toString();
+  static String? _whole(double? v) => v?.round().toString();
 
-  static String? _oneDecimal(double? v) =>
-      v == null ? null : v.toStringAsFixed(1);
+  static String? _oneDecimal(double? v) => v?.toStringAsFixed(1);
 
   /// Maps a metric onto a [0, 1] ring fill between [low] (→0) and [high] (→1).
   /// [low] may exceed [high] for "lower is better" metrics. Null → 0 (empty).

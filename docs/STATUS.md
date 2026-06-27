@@ -14,21 +14,50 @@
 ---
 
 ## Next up
-**M5 · Vitals dashboard is underway** on branch `m5-vitals` (cut from `dev`
-after PR #4 merged M4). The data-read layer + readiness proxy now ship. The next
-(and final M5) unchecked task is **Home renders StatRings + sparklines, with
-empty states** — replace the granted-state placeholder in `home_screen.dart`
-with the real dashboard. Watch `vitalsControllerProvider` (`AsyncNotifier<
-VitalsSnapshot>`, `features/vitals/vitals_controller.dart`): render its
-`AsyncValue` via `.when` (spinner / retryable error / loaded), draw the readiness
-proxy + each metric as `StatRing`s (the design-system widget already exists in
-`core/design/`), and show a per-metric empty state when that field is null
-(`VitalsReading` fields are all nullable — a metric the user hasn't recorded must
-not show a fake zero). Sparklines need a short series; this task's reader returns
-*scalar* current values only, so either add a series read to the reader (extend
-`VitalsReadClient.samples` is already series-shaped — surface the daily history)
-or scope sparklines to what's available. Wire pull-to-refresh to
-`VitalsController.refresh()`.
+**M5 · Vitals dashboard is complete** on branch `m5-vitals` — all four tasks are
+checked. Open a PR "Milestone M5: vitals" from `m5-vitals` into `dev` and stop;
+a human reviews + merges. After the merge, the next run cuts `m6-session` from
+`dev` and starts **M6 — Workout session engine + logging**, whose first task is
+**`WorkoutSensorSource` interface + `MockSensorSource` defined** (the hardware
+abstraction in `app/lib/sensors/sensor_source.dart` — `sensor_source.dart`
+already exists as a stub; define the interface and the mock so rep/form features
+build and run with no glasses attached, per the M7/guardrail rule).
+
+Dashboard design notes (this task, done): `features/home/home_screen.dart` now
+renders the live vitals dashboard inside `VitalsPermissionGate` instead of a
+placeholder. `_VitalsDashboard` (`ConsumerWidget`) watches
+`vitalsControllerProvider` and renders its `AsyncValue` via `.when` — a spinner
+(`Key('vitals-loading')`), a retryable error (`Key('vitals-error')` →
+`ref.invalidate`, belt-and-braces since the reader never throws), or the loaded
+`_DashboardBody`. The body is a scrollable `ListView` (`AlwaysScrollableScroll
+Physics`) wrapped in a `RefreshIndicator` whose `onRefresh` calls
+`VitalsController.refresh()` (pull-to-refresh). It draws a headline readiness
+`StatRing` (`_ReadinessHero`, em-dash + prompt when readiness is null) plus a
+`_VitalCard` per metric (resting HR / HRV / sleep / steps): a `StatRing` gauge
+(progress mapped per metric — HR lower-is-better, the rest higher), the formatted
+current value + unit, and a 7-day `Sparkline`. Each card shows a per-metric empty
+state (`Key('vital-empty-<id>')`, "No data yet") when its `VitalsReading` field
+is null — never a fabricated zero — and "Not enough history yet" when the series
+has <2 points. To feed real sparklines the data layer gained a daily-history
+read: `vitals_reader.dart` adds `VitalsSeries` (four `List<double>` daily series,
+oldest→newest, value-equality via `listEquals`) and `VitalsReader.readSeries()`;
+`HealthPackageVitalsReader.readSeries()` buckets the seam's samples by local day
+over a 7-day window (latest-per-day for HR/HRV, summed for sleep/steps, each
+`_guardList`ed so one failing metric degrades to an empty list), and
+`MockVitalsReader` returns a plausible 7-day series (provider default for
+tests/dev). `VitalsSnapshot` now carries `series` alongside `reading`; the
+controller reads both concurrently in `_load`. New `Sparkline` design-system
+widget (`core/design/widgets/sparkline.dart`, exported from the barrel): a
+`CustomPainter` polyline normalized to its own min/max, flat for a constant
+series, empty box for <2 points. 14 new tests: 4 reader-series
+(`vitals_reader_test.dart`: day bucketing/latest+sum, per-metric failure→empty,
+all-empty, mock series), 1 controller (series surfaced in the snapshot), 3
+`Sparkline` (`core/design/widgets_test.dart`: multi-point, <2 points, constant),
+6 dashboard (`test/features/home/home_screen_test.dart`: full render w/ 5 rings +
+4 sparklines + computed readiness, per-metric empty state, all-empty dashes,
+pull-to-refresh re-reads, loading spinner, error→retry recovers). `flutter
+analyze` clean, `flutter test` 143/143 green. (On-device HealthKit/Health Connect
+reads still can't run headless; the Dart analyze + test gate is what's verified.)
 
 Data-read design notes (this task, done): the read layer lives behind the
 `health` package in `core/health/vitals_reader.dart` (feature code never touches
@@ -262,7 +291,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] `health` package integrated (HealthKit + Health Connect)
 - [x] Permission handling with graceful denied state
 - [x] Reads resting HR, HRV, sleep, steps, readiness proxy
-- [ ] Home renders StatRings + sparklines, with empty states
+- [x] Home renders StatRings + sparklines, with empty states
 
 ### M6 — Workout session engine + logging  `[ ]`
 - [ ] `WorkoutSensorSource` interface + `MockSensorSource` defined
@@ -306,6 +335,39 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M5 · Home renders the live vitals dashboard, completing M5.
+  `features/home/home_screen.dart` replaces the granted-state placeholder with
+  the real dashboard inside `VitalsPermissionGate`. `_VitalsDashboard`
+  (`ConsumerWidget`) watches `vitalsControllerProvider` and renders its
+  `AsyncValue` via `.when`: a spinner (`Key('vitals-loading')`), a retryable
+  error (`Key('vitals-error')` → `ref.invalidate`; belt-and-braces, the reader
+  never throws), or the loaded `_DashboardBody` — a scrollable `ListView`
+  (`AlwaysScrollableScrollPhysics`) inside a `RefreshIndicator` whose `onRefresh`
+  calls `VitalsController.refresh()` (pull-to-refresh). It draws a headline
+  readiness `StatRing` (`_ReadinessHero`; em-dash + prompt when readiness is
+  null) and a `_VitalCard` per metric (resting HR / HRV / sleep / steps): a
+  `StatRing` gauge (progress mapped per metric — HR lower-is-better, the rest
+  higher), the formatted value + unit, and a 7-day `Sparkline`. Each card shows a
+  per-metric empty state (`Key('vital-empty-<id>')`, "No data yet") when its
+  nullable `VitalsReading` field is unset — never a fabricated zero — and "Not
+  enough history yet" when the series has <2 points. To feed real sparklines the
+  data layer gained a daily-history read: `core/health/vitals_reader.dart` adds
+  `VitalsSeries` (four `List<double>` daily series, oldest→newest, `listEquals`
+  value-equality) and `VitalsReader.readSeries()`;
+  `HealthPackageVitalsReader.readSeries()` buckets the `VitalsReadClient`
+  samples by local day over a 7-day window (latest-per-day for HR/HRV, summed for
+  sleep/steps), each `_guardList`ed so one failing metric degrades to an empty
+  list; `MockVitalsReader` (provider default) returns a plausible 7-day series.
+  `VitalsSnapshot` now carries `series` alongside `reading`, and the controller
+  reads both concurrently in `_load`. New `Sparkline` design-system widget
+  (`core/design/widgets/sparkline.dart`, exported from the barrel): a
+  `CustomPainter` polyline normalized to its own min/max, flat for a constant
+  series, empty for <2 points. 14 new tests: 4 reader-series, 1 controller
+  (series surfaced), 3 `Sparkline`, 6 dashboard (full render with 5 rings + 4
+  sparklines + computed readiness, per-metric empty state, all-empty dashes,
+  pull-to-refresh re-reads, loading spinner, error→retry recovers). `flutter
+  analyze` clean, `flutter test` 143/143 green. (On-device HealthKit/Health
+  Connect reads can't run headless; the Dart analyze + test gate is verified.)
 - 2026-06-27 · M5 · Vitals data-read layer + readiness proxy. New
   `core/health/vitals_reader.dart` reads the dashboard's metrics behind the
   `health` package (feature code never touches HealthKit/Health Connect directly,

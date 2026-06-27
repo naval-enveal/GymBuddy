@@ -122,6 +122,62 @@ void main() {
     });
   });
 
+  group('HealthPackageVitalsReader.readSeries', () {
+    test('buckets samples by day — latest HR/HRV, summed sleep/steps', () async {
+      final client = _FakeVitalsReadClient(
+        data: {
+          restingHeartRateType: [
+            HealthSample(value: 60, start: DateTime(2026, 6, 22, 8), end: DateTime(2026, 6, 22, 8)),
+            // Same day, later → wins for 06-22.
+            HealthSample(value: 62, start: DateTime(2026, 6, 22, 20), end: DateTime(2026, 6, 22, 20)),
+            HealthSample(value: 58, start: DateTime(2026, 6, 25, 7), end: DateTime(2026, 6, 25, 7)),
+          ],
+          stepsType: [
+            HealthSample(value: 1000, start: DateTime(2026, 6, 23, 9), end: DateTime(2026, 6, 23, 9)),
+            HealthSample(value: 500, start: DateTime(2026, 6, 23, 12), end: DateTime(2026, 6, 23, 12)),
+            HealthSample(value: 2000, start: DateTime(2026, 6, 26, 9), end: DateTime(2026, 6, 26, 9)),
+          ],
+          sleepAsleepType: [
+            // 06-24: 2h + 1h = 3h.
+            HealthSample(value: 0, start: DateTime(2026, 6, 24, 1), end: DateTime(2026, 6, 24, 3)),
+            HealthSample(value: 0, start: DateTime(2026, 6, 24, 4), end: DateTime(2026, 6, 24, 5)),
+            // Zero-duration → dropped, so 06-26 contributes no point.
+            HealthSample(value: 0, start: DateTime(2026, 6, 26, 2), end: DateTime(2026, 6, 26, 2)),
+          ],
+        },
+      );
+
+      final series = await readerWith(client).readSeries();
+
+      expect(series.restingHeartRate, [62, 58]); // oldest→newest
+      expect(series.steps, [1500, 2000]);
+      expect(series.sleepHours.length, 1);
+      expect(series.sleepHours.single, closeTo(3.0, 0.001));
+      expect(series.hrv, isEmpty); // no HRV recorded
+    });
+
+    test('a failing metric degrades to an empty series, not a throw', () async {
+      final client = _FakeVitalsReadClient(
+        data: {
+          restingHeartRateType: [
+            HealthSample(value: 52, start: DateTime(2026, 6, 25, 6), end: DateTime(2026, 6, 25, 6)),
+          ],
+        },
+        throwFor: {hrvType},
+      );
+
+      final series = await readerWith(client).readSeries();
+
+      expect(series.restingHeartRate, [52]);
+      expect(series.hrv, isEmpty);
+    });
+
+    test('no data at all yields an empty series', () async {
+      final series = await readerWith(_FakeVitalsReadClient()).readSeries();
+      expect(series, VitalsSeries.empty);
+    });
+  });
+
   group('MockVitalsReader', () {
     test('returns a populated snapshot for hardware-free dev/test', () async {
       const reader = MockVitalsReader();
@@ -131,6 +187,15 @@ void main() {
       expect(reading.hrv, isNotNull);
       expect(reading.sleepHours, isNotNull);
       expect(reading.steps, isNotNull);
+    });
+
+    test('returns plausible multi-day series for sparklines', () async {
+      const reader = MockVitalsReader();
+      final series = await reader.readSeries();
+      expect(series.restingHeartRate.length, greaterThanOrEqualTo(2));
+      expect(series.hrv.length, greaterThanOrEqualTo(2));
+      expect(series.sleepHours.length, greaterThanOrEqualTo(2));
+      expect(series.steps.length, greaterThanOrEqualTo(2));
     });
   });
 }

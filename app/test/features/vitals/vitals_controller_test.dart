@@ -120,6 +120,21 @@ void main() {
       expect(snapshot.readiness, 50);
     });
 
+    test('surfaces the daily series read alongside the scalar reading',
+        () async {
+      final reader = _FakeVitalsReader(
+        const VitalsReading(steps: 3000),
+        series: const VitalsSeries(steps: <double>[1000, 2000, 3000]),
+      );
+      final container = _containerWith(reader);
+
+      await _grant(container);
+      final snapshot =
+          await container.read(vitalsControllerProvider.future);
+
+      expect(snapshot.series.steps, <double>[1000, 2000, 3000]);
+    });
+
     test('keeps missing metrics empty while computing from what is present',
         () async {
       final reader = _FakeVitalsReader(const VitalsReading(sleepHours: 8));
