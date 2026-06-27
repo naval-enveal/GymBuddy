@@ -70,6 +70,14 @@ interface DatSdkClient {
     /** Stops watching the current exercise (rest or set completion). */
     fun stopTracking()
 
+    /**
+     * Speaks a short coaching cue through the glasses' speakers — the first output
+     * path back to the hardware. Best-effort: a client with no audio route (e.g.
+     * [UnavailableDatSdkClient]) does nothing, so the Dart layer can fire cues
+     * unconditionally and they degrade silently with no hardware.
+     */
+    fun playCue(message: String)
+
     /** Releases the glasses link and all resources. The client must not be used afterwards. */
     fun dispose()
 
@@ -125,6 +133,10 @@ internal class UnavailableDatSdkClient : DatSdkClient {
 
     override fun stopTracking() {}
 
+    override fun playCue(message: String) {
+        // No glasses, no speakers. Cues degrade to a silent no-op.
+    }
+
     override fun dispose() {}
 }
 
@@ -160,6 +172,11 @@ internal class DatSdkAvailable(private val context: Context) : DatSdkClient {
     override fun stopTracking() {
         this.listener = null
         // Real impl: pause the camera/mic pipeline.
+    }
+
+    override fun playCue(message: String) {
+        // Real impl: speak `message` through the glasses' speaker route (DAT SDK
+        // audio output / TTS). No-op until the SDK is vendored.
     }
 
     override fun dispose() {

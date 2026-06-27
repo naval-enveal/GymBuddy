@@ -20,6 +20,7 @@ import io.flutter.plugin.common.MethodChannel
  *                           capabilities: { repCounting: Bool, formTracking: Bool } }
  *      `startTracking` (args { name: String, formTracked: Bool }) -> null
  *      `stopTracking`  -> null
+ *      `playCue`       (args { message: String }) -> null
  *      `dispose`       -> null
  *  - event channel `gymbuddy/glasses/reps`     -> { index: Int, timestampMs: Long, confidence: Double? }
  *  - event channel `gymbuddy/glasses/formCues` -> { severity: String, message: String }
@@ -121,6 +122,16 @@ class GlassesChannel(
 
             "stopTracking" -> {
                 client.stopTracking()
+                result.success(null)
+            }
+
+            "playCue" -> {
+                val message = call.argument<String>("message")
+                if (message == null) {
+                    result.error("bad_args", "playCue requires a 'message'", null)
+                    return
+                }
+                client.playCue(message)
                 result.success(null)
             }
 

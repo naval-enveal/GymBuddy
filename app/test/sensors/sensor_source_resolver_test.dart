@@ -49,6 +49,9 @@ class _FakeSensorSource implements WorkoutSensorSource {
 
   @override
   Future<void> stopTracking() async {}
+
+  @override
+  Future<void> playCue(String message) async {}
 }
 
 void main() {

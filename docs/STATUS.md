@@ -14,22 +14,51 @@
 ---
 
 ## Next up
-**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–4 are done:
+**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–5 are done:
 both native sides mirror the `gymbuddy/glasses` wire contract, the Dart
-`MetaGlassesSensorSource` binds to those channels, and the composition root now
-probes the glasses once and falls back to `MockSensorSource` when they're
-unavailable. **Next: task 5 — audio cue playback through the glasses speakers.**
-This is the first *output* path back to the glasses (everything so far has been
-input: reps/form in). It will need a new method on the native control channel
-(e.g. `speak`/`playCue` over `gymbuddy/glasses`) on both Kotlin and Swift, a Dart
-affordance on `MetaGlassesSensorSource` to invoke it, and — keeping the mock-first
-rule — a graceful no-op when the glasses are absent (the app falls back to the
-mock, which has no speakers, so audio cues must degrade silently rather than
-assume hardware). Consider whether cue playback belongs on `WorkoutSensorSource`
-itself (so the session/coach layer can call it through the same seam the rest of
-the hardware goes through) or on a sibling output interface. Native Kotlin/Swift
-still can't be compiled headless (no Android SDK / Xcode) — the verifiable gate
-stays `flutter analyze` + `flutter test`.
+`MetaGlassesSensorSource` binds to those channels, the composition root probes the
+glasses once and falls back to `MockSensorSource` when they're unavailable, and
+the first *output* path — `playCue` audio over the glasses speakers — is wired end
+to end through the same seam. **Next: task 6 — custom mic-based wake trigger for
+Q&A.** This is the second input path *from* the glasses, but a control one rather
+than a tracking one: the glasses' mic listens for a wake phrase ("hey buddy"),
+which should open a hands-free Q&A turn (the actual Q&A round-trip is M9/AI). It
+needs a native trigger on `gymbuddy/glasses` — most likely a third `EventChannel`
+(e.g. `gymbuddy/glasses/wake`) emitting a wake event, since wake detection is an
+asynchronous push from the DAT SDK's always-on mic, not a request/response — plus
+a Dart affordance to expose it (a `Stream` on `WorkoutSensorSource`, mirroring
+`reps`/`formCues`). Keep the mock-first rule: `MockSensorSource` must surface the
+wake stream too (driveable in tests, like `emitRep`/`emitFormCue`) so Q&A wiring
+runs with no hardware, and the glasses source degrades to an empty/never-firing
+stream when the SDK is absent. Decide where the wake-trigger config lives (the
+phrase may be fixed for now). Native Kotlin/Swift still can't be compiled headless
+(no Android SDK / Xcode) — the verifiable gate stays `flutter analyze` +
+`flutter test`.
+
+Audio-cue design notes (task 5, done): the first *output* path back to the
+glasses. Rather than a sibling interface, `playCue(String message)` was added to
+the existing `WorkoutSensorSource` seam (`app/lib/sensors/sensor_source.dart`) so
+the session/coach layer reaches the speakers through the *one* resolved source the
+rest of the hardware already goes through — no second provider or parallel
+fallback machinery. Contract: best-effort, must **never** throw on a delivery
+failure. `MockSensorSource.playCue` (the fallback whenever glasses are absent) is
+a silent no-op — it has no speakers — guarded by the same `_ensureActive()` as the
+other lifecycle calls (so it throws only after `dispose`, parity with the rest);
+callers can fire cues unconditionally and they vanish harmlessly with no hardware.
+`MetaGlassesSensorSource.playCue` invokes `playCue` over the control
+`MethodChannel('gymbuddy/glasses')` with `{message}`, swallowing
+`PlatformException`/`MissingPluginException` (no speaker route / unregistered
+channel) — the cue is coaching, not control flow. Native sides mirror the new
+verb: Kotlin/Swift `DatSdkClient` gained `playCue(message)` (`Unavailable*` =
+silent no-op; `DatSdkAvailable*` = TODO over the SDK's audio/TTS route once
+vendored), and both `GlassesChannel`s handle the `playCue` method (args
+`{message}`, `bad_args` error if missing, else null) with the wire-contract doc
+updated on both. 5 new Dart tests (3 `meta_glasses_sensor_source_test.dart`:
+forwards `{message}`, swallows a `PlatformException`, swallows a
+`MissingPluginException`; 1 `mock_sensor_source_test.dart`: silent no-op completes;
+plus the after-dispose-throws assertions extended in both). `flutter analyze`
+clean, `flutter test` 221/221 green (native isn't compilable headless — the Dart
+gate is what's verified).
 
 Capability-detection design notes (task 4, done): the M7 fallback lives in
 `app/lib/sensors/sensor_source_resolver.dart` — a single async
@@ -597,7 +626,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] iOS (Swift) platform channel wrapping DAT SDK
 - [x] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
 - [x] Capability detection + fallback to MockSensorSource
-- [ ] Audio cue playback through glasses speakers
+- [x] Audio cue playback through glasses speakers
 - [ ] Custom mic-based wake trigger for Q&A
 - [ ] App builds + runs with no hardware present
 
@@ -627,6 +656,23 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · Audio cue playback through the glasses speakers — the first
+  *output* path back to the hardware. `playCue(String message)` was added to the
+  `WorkoutSensorSource` seam (so the session/coach layer reaches the speakers
+  through the one resolved source the rest of the hardware already goes through,
+  not a sibling interface). Contract: best-effort, never throws on a delivery
+  failure. `MockSensorSource.playCue` is a silent no-op (no speakers — the
+  fallback whenever glasses are absent), so cues fired with no hardware degrade
+  harmlessly; `MetaGlassesSensorSource.playCue` invokes `playCue` over
+  `MethodChannel('gymbuddy/glasses')` with `{message}`, swallowing
+  `PlatformException`/`MissingPluginException`. Native sides mirror the verb:
+  Kotlin/Swift `DatSdkClient` gained `playCue(message)` (`Unavailable*` no-op,
+  `DatSdkAvailable*` TODO over the SDK audio/TTS route) and both `GlassesChannel`s
+  handle the `playCue` method (`{message}` → null, `bad_args` if missing), wire
+  doc updated on both. 5 new Dart tests (meta: forwards/swallows-PlatformException/
+  swallows-MissingPlugin; mock: silent-no-op; after-dispose-throws extended in
+  both). `flutter analyze` clean, `flutter test` 221/221 green (native isn't
+  compilable headless — the Dart gate is verified).
 - 2026-06-27 · M7 · Capability detection + fallback to `MockSensorSource`. New
   `app/lib/sensors/sensor_source_resolver.dart` exposes
   `resolveWorkoutSensorSource({glassesFactory, mockFactory})`: it builds the

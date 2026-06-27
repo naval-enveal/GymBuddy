@@ -74,6 +74,14 @@ class MockSensorSource implements WorkoutSensorSource {
     _tracking = null;
   }
 
+  @override
+  Future<void> playCue(String message) async {
+    _ensureActive();
+    // The mock has no speakers, so a cue degrades to a silent no-op. The
+    // session/coach layer can fire cues unconditionally and they vanish
+    // harmlessly when no glasses are attached (the mock-first rule).
+  }
+
   /// Emits one rep for the exercise being tracked, advancing the set count.
   /// No-op when not tracking or after [dispose].
   void emitRep({double? confidence}) {

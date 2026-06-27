@@ -103,6 +103,22 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   }
 
   @override
+  Future<void> playCue(String message) async {
+    _ensureActive();
+    try {
+      await _methods.invokeMethod<void>('playCue', <String, Object?>{
+        'message': message,
+      });
+    } on PlatformException {
+      // Best-effort output: if the glasses can't speak the cue (no speaker
+      // route, transient SDK error) swallow it rather than surfacing a
+      // blocking error mid-workout — the cue is coaching, not control flow.
+    } on MissingPluginException {
+      // Channel never registered — nothing to play.
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;

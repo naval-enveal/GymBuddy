@@ -151,6 +151,36 @@ void main() {
         throwsStateError,
       );
       await expectLater(source.stopTracking(), throwsStateError);
+      await expectLater(source.playCue('Go'), throwsStateError);
+    });
+  });
+
+  group('playCue (audio output)', () {
+    test('forwards the message over the control channel', () async {
+      final source = MetaGlassesSensorSource();
+      await source.playCue('Keep your back straight');
+
+      expect(calls.single.method, 'playCue');
+      expect(calls.single.arguments, <String, Object?>{
+        'message': 'Keep your back straight',
+      });
+    });
+
+    test('swallows a native failure rather than blocking the workout',
+        () async {
+      methodReply = (call) => throw PlatformException(code: 'no_speaker');
+      final source = MetaGlassesSensorSource();
+
+      // Best-effort output: a delivery failure must not surface as an error.
+      await expectLater(source.playCue('Nice rep'), completes);
+    });
+
+    test('swallows a missing-plugin failure on an unsupported platform',
+        () async {
+      messenger.setMockMethodCallHandler(methodChannel, null);
+      final source = MetaGlassesSensorSource();
+
+      await expectLater(source.playCue('Nice rep'), completes);
     });
   });
 

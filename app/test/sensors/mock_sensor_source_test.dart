@@ -142,6 +142,13 @@ void main() {
       await sub.cancel();
     });
 
+    test('playCue is a silent no-op (no speakers on the mock)', () async {
+      final source = MockSensorSource(autoSimulate: false);
+      addTearDown(source.dispose);
+      // Callers fire cues unconditionally; the mock just swallows them.
+      await expectLater(source.playCue('Drive through your heels'), completes);
+    });
+
     test('using the source after dispose throws', () async {
       final source = MockSensorSource(autoSimulate: false);
       await source.dispose();
@@ -149,6 +156,7 @@ void main() {
         source.startTracking(const TrackedExercise(name: 'Squat')),
         throwsStateError,
       );
+      await expectLater(source.playCue('Go'), throwsStateError);
     });
   });
 

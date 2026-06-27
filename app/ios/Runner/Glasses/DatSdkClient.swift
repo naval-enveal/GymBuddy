@@ -67,6 +67,12 @@ protocol DatSdkClient: AnyObject {
   /// Stops watching the current exercise (rest or set completion).
   func stopTracking()
 
+  /// Speaks a short coaching cue through the glasses' speakers — the first output
+  /// path back to the hardware. Best-effort: a client with no audio route (e.g.
+  /// `UnavailableDatSdkClient`) does nothing, so the Dart layer can fire cues
+  /// unconditionally and they degrade silently with no hardware.
+  func playCue(_ message: String)
+
   /// Releases the glasses link and all resources. The client must not be used afterwards.
   func dispose()
 }
@@ -113,6 +119,10 @@ final class UnavailableDatSdkClient: DatSdkClient {
 
   func stopTracking() {}
 
+  func playCue(_ message: String) {
+    // No glasses, no speakers. Cues degrade to a silent no-op.
+  }
+
   func dispose() {}
 }
 
@@ -147,6 +157,11 @@ final class DatSdkAvailableClient: DatSdkClient {
   func stopTracking() {
     self.listener = nil
     // Real impl: pause the camera/mic pipeline.
+  }
+
+  func playCue(_ message: String) {
+    // Real impl: speak `message` through the glasses' speaker route (DAT SDK
+    // audio output / TTS). No-op until the SDK is vendored.
   }
 
   func dispose() {

@@ -157,6 +157,18 @@ abstract interface class WorkoutSensorSource {
   /// Stops watching the current exercise (e.g. on rest or set completion).
   Future<void> stopTracking();
 
+  /// Speaks a short coaching cue through the glasses' speakers — the first
+  /// *output* path back to the hardware (everything else here is input). It
+  /// lives on this same seam, rather than a sibling interface, so the
+  /// session/coach layer reaches the speakers through the one resolved source
+  /// the rest of the hardware already goes through.
+  ///
+  /// Best-effort and must never throw on a delivery failure: a source with no
+  /// speakers ([MockSensorSource], the fallback whenever glasses are absent)
+  /// implements this as a silent no-op, so callers can fire cues
+  /// unconditionally and they degrade gracefully with no hardware attached.
+  Future<void> playCue(String message);
+
   /// Releases all resources and closes the event streams. The source must not
   /// be used afterwards.
   Future<void> dispose();

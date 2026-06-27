@@ -13,6 +13,7 @@ import Foundation
 ///                           capabilities: { repCounting: Bool, formTracking: Bool } }
 ///      `startTracking` (args { name: String, formTracked: Bool }) -> null
 ///      `stopTracking`  -> null
+///      `playCue`       (args { message: String }) -> null
 ///      `dispose`       -> null
 ///  - event channel `gymbuddy/glasses/reps`     -> { index: Int, timestampMs: Int, confidence: Double? }
 ///  - event channel `gymbuddy/glasses/formCues` -> { severity: String, message: String }
@@ -78,6 +79,17 @@ final class GlassesChannel: NSObject {
 
     case "stopTracking":
       client.stopTracking()
+      result(nil)
+
+    case "playCue":
+      let args = call.arguments as? [String: Any]
+      guard let message = args?["message"] as? String else {
+        result(
+          FlutterError(
+            code: "bad_args", message: "playCue requires a 'message'", details: nil))
+        return
+      }
+      client.playCue(message)
       result(nil)
 
     case "dispose":
