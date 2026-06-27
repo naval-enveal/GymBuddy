@@ -15,17 +15,64 @@
 
 ## Next up
 **M6 · Workout session engine + logging** is underway on branch `m6-session`
-(cut from `dev` after M5 merged via PR #5). The sensor abstraction (first task)
-is done; the next task is **Session state machine (exercise → set → rest →
-next)**. Model it as a Riverpod controller that drives a workout through its
-exercises and sets — per-set rep target, rest countdown between sets, advance to
-the next exercise — feeding off `workoutSensorSourceProvider`'s `reps` stream for
-auto-advance while leaving room for the manual-logging fallback (a later task).
-It must run end to end against `MockSensorSource` with no glasses attached. Keep
-all logic in the controller, none in widgets; the focus-mode UI is the task after
-that. Reuse the `sensors/` value types (`TrackedExercise`, `RepEvent`,
-`FormCue`) — map a plan exercise down to `TrackedExercise` at the session edge so
-the engine never imports the plans feature's models.
+(cut from `dev` after M5 merged via PR #5). The sensor abstraction and the
+session state machine are done; the next task is **Focus-mode UI (RepCounter,
+RestTimer)**. Build it as a `ConsumerWidget` over `workoutSessionControllerProvider`
+that renders `WorkoutSessionState` and forwards the controller's manual actions
+(`completeSet`/`skipRest`/`stop`) — per the no-logic-in-widgets rule the screen
+is pure presentation. Reuse the design-system `RepCounter` (huge glanceable
+numeral + target) and `RestTimer` (depleting ring + m:ss) widgets already in
+`core/design/`. Drive it per `SessionStatus`: an exercising view (rep counter
+against `targetReps`, latest `formCue`, exercise/set progress), a resting view
+(`RestTimer` off `restRemaining` + a skip action), and a completed view (the
+`completedSets` summary — the post-workout sync to WorkoutLog is the task after).
+Wire the Workout tab (`workout_screen.dart`, currently a `ComingSoon`
+placeholder) to start a session from the active plan's first training day —
+map its `PlanWorkout` to a `SessionPlan` via `PlanWorkout.toSessionPlan()`
+(the session edge in `session_mapper.dart`). Remember `MockSensorSource`'s
+`autoSimulate: true` default makes reps tick automatically in dev builds, so the
+focus-mode UI animates with no glasses.
+
+Session state-machine design notes (this task, done): the engine lives in
+`features/workout/`, fully decoupled from the plans feature. `session_models.dart`
+holds the feature-agnostic value types — `SessionExercise`
+(`{TrackedExercise exercise, int sets, int? targetReps, int restSeconds}`; a null
+`targetReps` = a "to failure"/time-based set that never auto-advances),
+`SessionPlan` (`{name, List<SessionExercise>}`, with a const `empty`),
+`CompletedSet` (`{exerciseName, setNumber, reps}`, accumulated as the session
+advances to feed the later WorkoutLog sync), `SessionStatus`
+(`idle`/`exercising`/`resting`/`completed`), and the immutable
+`WorkoutSessionState` (status, plan, `exerciseIndex` 0-based, `setNumber`
+1-based, `reps`, `restRemaining`, `completedSets`, nullable `formCue`) with
+derived getters (`currentExercise`, `targetReps`, `exerciseNumber`,
+`isExercising`/`isResting`/…) and a `copyWith` whose `clearFormCue` flag nulls
+the cue (plain `copyWith` can't pass null). `session_mapper.dart` is the **single
+seam** to the plans models: `PlanWorkout.toSessionPlan()` reduces each
+`PlanExercise` to a `TrackedExercise` (+ prescription, null-safe defaults: 1 set,
+60s rest) — the controller itself never imports the plans feature.
+`workout_session_controller.dart` — `WorkoutSessionController extends
+Notifier<WorkoutSessionState>` (provider `workoutSessionControllerProvider`,
+non-autoDispose): `start(plan)` connects `workoutSensorSourceProvider`,
+subscribes to its `reps`/`formCues` broadcast streams, and tracks the first
+exercise (no-op on an empty plan or an already-active session); a rep at/over
+`targetReps` auto-completes the set; `completeSet()` records the set and either
+enters a rest countdown (`Timer.periodic(1s)` decrementing `restRemaining`, which
+auto-advances at zero — or immediately when rest ≤ 0) or finishes the workout if
+it was the last set; `skipRest()` jumps past the countdown; `_advance()` moves to
+the next set or exercise (resetting reps + resuming tracking) or completes;
+`stop()` tears down and returns to idle. Guards: reps/cues are ignored unless
+exercising, and `completeSet()` flips status synchronously before the async
+`stopTracking()` so a straggler rep can't double-complete. `completeSet()` is
+also the manual seam the manual-logging fallback (a later task) builds on. Runs
+end to end against `MockSensorSource` with no glasses. 20 tests
+(`test/features/workout/`): 6 model/mapper (`session_models_test.dart` — value
+equality, derived getters, `copyWith` cue-clearing, the `toSessionPlan` edge with
+default fallbacks) and 14 controller (`workout_session_controller_test.dart` —
+start/empty-plan/no-restart, rep counting, auto-advance on target, null-target
+manual completion, rest-phase reps ignored, skipRest, next-exercise advance,
+final-set completion, zero-rest immediate advance, form-cue surface+clear on
+advance, stop→idle, and a `fakeAsync` rest-countdown tick test mirroring the mock
+sensor's timer pattern). `flutter analyze` clean, `flutter test` 176/176 green.
 
 Sensor-layer design notes (this task, done): the hardware abstraction lives in
 `app/lib/sensors/`. `sensor_source.dart` defines `WorkoutSensorSource` (an
@@ -330,7 +377,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M6 — Workout session engine + logging  `[ ]`
 - [x] `WorkoutSensorSource` interface + `MockSensorSource` defined
-- [ ] Session state machine (exercise → set → rest → next)
+- [x] Session state machine (exercise → set → rest → next)
 - [ ] Focus-mode UI (RepCounter, RestTimer)
 - [ ] Manual rep/weight logging fallback
 - [ ] Post-workout summary syncs to WorkoutLog
@@ -370,6 +417,39 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M6 · Session state machine (exercise → set → rest → next). New
+  `features/workout/` engine, fully decoupled from the plans feature.
+  `session_models.dart` defines the feature-agnostic value types —
+  `SessionExercise` (`{TrackedExercise exercise, int sets, int? targetReps,
+  int restSeconds}`; a null `targetReps` is a "to failure"/time-based set that
+  never auto-advances), `SessionPlan`, `CompletedSet` (accumulated for the later
+  WorkoutLog sync), `SessionStatus` (idle/exercising/resting/completed), and the
+  immutable `WorkoutSessionState` (status, plan, 0-based `exerciseIndex`, 1-based
+  `setNumber`, `reps`, `restRemaining`, `completedSets`, nullable `formCue`) with
+  derived getters and a `copyWith` whose `clearFormCue` flag nulls the cue.
+  `session_mapper.dart` is the single seam to the plans models —
+  `PlanWorkout.toSessionPlan()` reduces each `PlanExercise` to a `TrackedExercise`
+  (+ prescription, null-safe defaults: 1 set, 60s rest) so the controller never
+  imports the plans feature. `workout_session_controller.dart` —
+  `WorkoutSessionController extends Notifier<WorkoutSessionState>` (provider
+  `workoutSessionControllerProvider`): `start(plan)` connects
+  `workoutSensorSourceProvider`, subscribes to its broadcast `reps`/`formCues`,
+  and tracks the first exercise (no-op on an empty/already-active session); a rep
+  at/over `targetReps` auto-completes the set; `completeSet()` records it and
+  either runs a rest countdown (`Timer.periodic(1s)` over `restRemaining`,
+  auto-advancing at zero — or immediately when rest ≤ 0) or finishes the workout
+  on the last set; `skipRest()` jumps the countdown; `_advance()` moves to the
+  next set/exercise (resetting reps + resuming tracking) or completes; `stop()`
+  returns to idle. Reps/cues are ignored unless exercising, and `completeSet()`
+  flips status synchronously before the async `stopTracking()` so a straggler rep
+  can't double-complete; it's also the manual seam the later manual-logging
+  fallback builds on. Runs end to end against `MockSensorSource` with no glasses.
+  20 new tests (`test/features/workout/`): 6 model/mapper + 14 controller
+  (start/empty/no-restart, rep counting, auto-advance on target, null-target
+  manual completion, rest-phase reps ignored, skipRest, next-exercise advance,
+  final-set completion, zero-rest immediate advance, form-cue surface+clear, stop,
+  and a `fakeAsync` rest-countdown tick test). `flutter analyze` clean,
+  `flutter test` 176/176 green.
 - 2026-06-27 · M6 · `WorkoutSensorSource` interface + `MockSensorSource` defined,
   starting M6 on branch `m6-session`. New `app/lib/sensors/sensor_source.dart`
   defines the hardware abstraction every rep/form feature depends on:
