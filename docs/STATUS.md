@@ -14,14 +14,49 @@
 ---
 
 ## Next up
-**M5 · Vitals dashboard is complete** on branch `m5-vitals` — all four tasks are
-checked. Open a PR "Milestone M5: vitals" from `m5-vitals` into `dev` and stop;
-a human reviews + merges. After the merge, the next run cuts `m6-session` from
-`dev` and starts **M6 — Workout session engine + logging**, whose first task is
-**`WorkoutSensorSource` interface + `MockSensorSource` defined** (the hardware
-abstraction in `app/lib/sensors/sensor_source.dart` — `sensor_source.dart`
-already exists as a stub; define the interface and the mock so rep/form features
-build and run with no glasses attached, per the M7/guardrail rule).
+**M6 · Workout session engine + logging** is underway on branch `m6-session`
+(cut from `dev` after M5 merged via PR #5). The sensor abstraction (first task)
+is done; the next task is **Session state machine (exercise → set → rest →
+next)**. Model it as a Riverpod controller that drives a workout through its
+exercises and sets — per-set rep target, rest countdown between sets, advance to
+the next exercise — feeding off `workoutSensorSourceProvider`'s `reps` stream for
+auto-advance while leaving room for the manual-logging fallback (a later task).
+It must run end to end against `MockSensorSource` with no glasses attached. Keep
+all logic in the controller, none in widgets; the focus-mode UI is the task after
+that. Reuse the `sensors/` value types (`TrackedExercise`, `RepEvent`,
+`FormCue`) — map a plan exercise down to `TrackedExercise` at the session edge so
+the engine never imports the plans feature's models.
+
+Sensor-layer design notes (this task, done): the hardware abstraction lives in
+`app/lib/sensors/`. `sensor_source.dart` defines `WorkoutSensorSource` (an
+`abstract interface class`) plus its value types — `SensorCapabilities`
+(`repCounting`/`formTracking`, read before surfacing capability-gated UI),
+`SensorAvailability` (`available`/`unavailable`, what M7's capability detection
+falls back on), `TrackedExercise` (a minimal, feature-agnostic `{name,
+formTracked}` descriptor so the `sensors/` layer never depends on the plans
+models), `RepEvent` (`{index (1-based, resets per set), timestamp, confidence?}`)
+and `FormCue` (`{severity, message}`, `FormSeverity` good/minor/major). The
+interface exposes broadcast `Stream<RepEvent> reps` + `Stream<FormCue> formCues`
+and lifecycle `connect() → startTracking(exercise) → stopTracking() → dispose()`.
+`workoutSensorSourceProvider` defaults to `MockSensorSource` (mock-first rule —
+M7 overrides it with the DAT-SDK-backed source that itself falls back to the mock
+when glasses report `unavailable`). `mock_sensor_source.dart` —
+`MockSensorSource` advertises full capabilities; while tracking with
+`autoSimulate: true` (the app/dev default) it emits a rep every `repInterval` on
+a `Timer.periodic` plus a periodic "good form" cue for form-tracked exercises, so
+focus-mode UI animates with no hardware. Tests construct it with `autoSimulate:
+false` + an injected `clock` and drive `emitRep`/`emitFormCue` directly for
+determinism; `emitFormCue` no-ops for rep-only exercises (the source can't see
+form), `emitRep` no-ops before tracking, and any use after `dispose()` throws.
+20 tests (`test/sensors/mock_sensor_source_test.dart`): provider default, value
+equality for all four types, the mock contract (capabilities, connect, rep
+indexing + reset, form-cue gating, use-after-dispose), and two auto-simulation
+tests. **Gotcha for the next timer-driven tests:** the auto-simulation tests run
+under `fakeAsync` (added `fake_async` to dev_deps), NOT `testWidgets`/
+`tester.pump` — awaiting a broadcast `StreamController.close()` inside the
+widget-tester binding's fake-async zone never resolves and hangs the runner
+(reproduced cleanly in this env); `fakeAsync` + `async.elapse`/`flushMicrotasks`
+drives the periodic timer deterministically with no hang.
 
 Dashboard design notes (this task, done): `features/home/home_screen.dart` now
 renders the live vitals dashboard inside `VitalsPermissionGate` instead of a
@@ -294,7 +329,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Home renders StatRings + sparklines, with empty states
 
 ### M6 — Workout session engine + logging  `[ ]`
-- [ ] `WorkoutSensorSource` interface + `MockSensorSource` defined
+- [x] `WorkoutSensorSource` interface + `MockSensorSource` defined
 - [ ] Session state machine (exercise → set → rest → next)
 - [ ] Focus-mode UI (RepCounter, RestTimer)
 - [ ] Manual rep/weight logging fallback
@@ -335,6 +370,37 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M6 · `WorkoutSensorSource` interface + `MockSensorSource` defined,
+  starting M6 on branch `m6-session`. New `app/lib/sensors/sensor_source.dart`
+  defines the hardware abstraction every rep/form feature depends on:
+  `WorkoutSensorSource` (an `abstract interface class`) with broadcast
+  `Stream<RepEvent> reps` + `Stream<FormCue> formCues` and a
+  `connect() → startTracking(TrackedExercise) → stopTracking() → dispose()`
+  lifecycle, plus its feature-agnostic value types — `SensorCapabilities`
+  (`repCounting`/`formTracking`), `SensorAvailability` (`available`/`unavailable`,
+  for M7 capability detection + mock fallback), `TrackedExercise`
+  (`{name, formTracked}`, so the `sensors/` layer never depends on the plans
+  models), `RepEvent` (`{index (1-based per set), timestamp, confidence?}`) and
+  `FormCue` (`{severity, message}` over `FormSeverity` good/minor/major), all with
+  value equality. `workoutSensorSourceProvider` defaults to `MockSensorSource`
+  (mock-first rule; M7 overrides it with the DAT-SDK source that itself falls back
+  to the mock when glasses report `unavailable`). New `mock_sensor_source.dart` —
+  `MockSensorSource` advertises full capabilities and, while tracking with
+  `autoSimulate: true` (app/dev default), emits a rep every `repInterval` on a
+  `Timer.periodic` plus a periodic "good form" cue for form-tracked exercises, so
+  the focus-mode UI animates with no hardware; tests drive it deterministically
+  with `autoSimulate: false`, an injected `clock`, and direct
+  `emitRep`/`emitFormCue` (which no-op for rep-only exercises, before tracking, or
+  after `dispose()` — use-after-dispose throws). 20 new tests
+  (`app/test/sensors/mock_sensor_source_test.dart`): provider default, value
+  equality across all four types, the mock contract (capabilities, connect, rep
+  indexing + per-set reset, form-cue gating, use-after-dispose), and two
+  auto-simulation tests. The auto-simulation tests run under `fakeAsync` (added
+  `fake_async` to dev_dependencies), not `testWidgets`/`tester.pump`: awaiting a
+  broadcast `StreamController.close()` inside the widget-tester binding's
+  fake-async zone never resolves and hangs the runner (reproduced in this env), so
+  `fakeAsync` + `async.elapse`/`flushMicrotasks` drives the periodic timer
+  deterministically instead. `flutter analyze` clean, `flutter test` 156/156 green.
 - 2026-06-27 · M5 · Home renders the live vitals dashboard, completing M5.
   `features/home/home_screen.dart` replaces the granted-state placeholder with
   the real dashboard inside `VitalsPermissionGate`. `_VitalsDashboard`
