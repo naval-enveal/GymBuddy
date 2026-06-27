@@ -8,6 +8,15 @@
     <uses-permission android:name="android.permission.health.READ_STEPS"/>
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
 
+    <!-- Meta DAT SDK glasses bridge (M7): the toolkit pairs over Bluetooth and
+         streams the glasses' POV camera + mic for rep/form tracking and the
+         mic-based Q&A wake trigger. All hardware-gated — the app still builds and
+         runs with no glasses (the channel reports `unavailable`). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
+
     <application
         android:label="gymbuddy"
         android:name="${applicationName}"

@@ -14,11 +14,47 @@
 ---
 
 ## Next up
-**M6 is complete** — all five tasks are checked on branch `m6-session` (cut from
-`dev` after M5 merged via PR #5). The PR into `dev` ("Milestone M6: session") has
-been merged. **M7 is now [GATE CLEARED]** — proceed with the first unchecked M7
-task. M7 tasks must run without hardware (MockSensorSource fallback). Cut branch
-`m7-glasses` from `dev` and begin the first task.
+**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Task 1 (Android
+Kotlin platform channel) is done. **Next: task 2 — iOS (Swift) platform channel
+wrapping DAT SDK.** Mirror the Android wire contract exactly (see the Android
+design notes below): the same channel/method names and event payload shapes, the
+same graceful-absence posture (no DAT SDK bundled ⇒ `connect` resolves to
+`unavailable`, no events) so the app builds and runs with no hardware. M7 tasks
+must run without hardware (MockSensorSource fallback). Note: native Kotlin/Swift
+can't be compiled in this headless env (no Android SDK / Xcode) — the verifiable
+gate stays `flutter analyze` + `flutter test`, same as the prior native tasks.
+
+Android glasses-channel design notes (this task, done): the Android side of the
+glasses platform channel lives in
+`app/android/app/src/main/kotlin/com/gymbuddy/gymbuddy/glasses/`. The wire
+contract (mirror it on iOS + in the Dart `MetaGlassesSensorSource`): a control
+`MethodChannel` **`gymbuddy/glasses`** — `connect` →
+`{availability: "available"|"unavailable", capabilities: {repCounting, formTracking}}`,
+`startTracking` (args `{name, formTracked}`) → null, `stopTracking` → null,
+`dispose` → null — plus two streaming `EventChannel`s: **`gymbuddy/glasses/reps`**
+(`{index, timestampMs, confidence?}`) and **`gymbuddy/glasses/formCues`**
+(`{severity, message}` over the Dart `FormSeverity` names good/minor/major).
+`DatSdkClient.kt` is the seam over Meta's DAT SDK (camera/audio/mic): an interface
+(`connect`/`capabilities`/`startTracking`/`stopTracking`/`dispose` + a
+`TrackingListener` for rep/form callbacks) with `DatSdkClient.create(context)` —
+the DAT SDK is Meta-proprietary and **not** a compile-time dependency, so the
+factory detects it **reflectively** (`Class.forName("com.meta.wearables.dat.DeviceAccessToolkit")`,
+swallowing every load failure as "absent") and returns `UnavailableDatSdkClient`
+(connects to nothing, no capabilities, emits no events) whenever it's missing —
+which is every build until the SDK is vendored — so the Dart layer reads
+`unavailable` and falls back to `MockSensorSource`. `DatSdkAvailable` is the real
+path, instantiated only when the SDK is present; until its camera/audio/mic
+streams are confirmed live it conservatively reports `unavailable` rather than
+claiming a connection it can't back (integration TODOs marked inline; M8 feeds the
+pose pipeline through `startTracking`). `GlassesChannel.kt` bridges the channels
+to the client and posts every event-sink emission onto the main looper (Flutter
+sinks require the platform thread); `dispose()` clears handlers + the client.
+Wired in `MainActivity.configureFlutterEngine` (constructed there, torn down in
+`cleanUpFlutterEngine`). Manifest gained `BLUETOOTH_CONNECT` / `CAMERA` /
+`RECORD_AUDIO` (the DAT SDK pairs over BLE and streams the glasses' POV
+camera+mic) and a non-required `camera.any` feature. `flutter analyze` clean,
+`flutter test` 199/199 green (no Dart changed — confirms no regression; the Kotlin
+isn't compilable headless).
 
 WorkoutLog-sync design notes (this task, done): the post-workout summary now
 persists to the backend on completion. **Server:** new `POST /workout-logs`
@@ -464,7 +500,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Post-workout summary syncs to WorkoutLog
 
 ### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
-- [ ] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
+- [x] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
 - [ ] iOS (Swift) platform channel wrapping DAT SDK
 - [ ] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
 - [ ] Capability detection + fallback to MockSensorSource
@@ -498,6 +534,28 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · Android (Kotlin) platform channel wrapping the DAT SDK
+  (camera/audio/mic), starting M7 on branch `m7-glasses`. New
+  `app/android/app/src/main/kotlin/com/gymbuddy/gymbuddy/glasses/`:
+  `DatSdkClient.kt` is the native seam over Meta's DAT SDK — an interface
+  (`connect`/`capabilities`/`startTracking`/`stopTracking`/`dispose` + a
+  `TrackingListener` for rep/form callbacks) whose `create(context)` factory
+  detects the SDK **reflectively** (it's Meta-proprietary, not a compile-time dep)
+  and returns an `UnavailableDatSdkClient` (no connection, no capabilities, no
+  events) whenever it's absent — every build until the SDK is vendored — so the
+  Dart layer reads `unavailable` and falls back to `MockSensorSource`, keeping the
+  app buildable/runnable with no hardware. `GlassesChannel.kt` exposes the wire
+  contract the iOS channel + Dart `MetaGlassesSensorSource` will mirror: control
+  `MethodChannel` `gymbuddy/glasses` (`connect` → availability + capabilities,
+  `startTracking {name, formTracked}`, `stopTracking`, `dispose`) plus event
+  channels `gymbuddy/glasses/reps` (`{index, timestampMs, confidence?}`) and
+  `gymbuddy/glasses/formCues` (`{severity, message}`), posting sink emissions onto
+  the main looper. Wired in `MainActivity.configureFlutterEngine` (torn down in
+  `cleanUpFlutterEngine`); manifest gained `BLUETOOTH_CONNECT`/`CAMERA`/
+  `RECORD_AUDIO` + a non-required `camera.any` feature for the BLE-paired POV
+  camera/mic. Native Kotlin isn't compilable in this headless env (no Android
+  SDK), so the verifiable gate is the Dart side: `flutter analyze` clean, `flutter
+  test` 199/199 green (no Dart changed — confirms no regression).
 - 2026-06-27 · M6 · Post-workout summary syncs to WorkoutLog, completing M6. The
   finished session now persists to the backend on completion. Server: new
   `POST /workout-logs` (`requireAuth` → `validateWorkoutLog` → `createLog`),
