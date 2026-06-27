@@ -455,7 +455,8 @@ class _RestingView extends StatelessWidget {
 }
 
 /// Post-workout summary: every set that was completed, then a done action that
-/// returns the session to idle. (Syncing this to WorkoutLog is the next task.)
+/// returns the session to idle. The session controller syncs this summary to
+/// the backend WorkoutLog on completion (best-effort, off the UI path).
 class _CompletedView extends StatelessWidget {
   const _CompletedView({required this.state, required this.onDone});
 

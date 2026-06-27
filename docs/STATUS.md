@@ -14,25 +14,50 @@
 ---
 
 ## Next up
-**M6 · Workout session engine + logging** is underway on branch `m6-session`
-(cut from `dev` after M5 merged via PR #5). The sensor abstraction, the session
-state machine, the focus-mode UI, and the manual rep/weight logging fallback are
-done; the last M6 task is **Post-workout summary syncs to WorkoutLog**. The
-`_CompletedView` in `workout_screen.dart` already renders the finished session
-(`state.completedSets` — each a `CompletedSet{exerciseName, setNumber, reps,
-weight?}`) and its "Done" button calls `controller.stop()` → idle. What's
-missing is persisting that summary to the backend before/at stop: add a server
-`WorkoutLog` write endpoint (the `WorkoutLog` Mongoose model already exists from
-M1; check its shape) behind `requireAuth`, a client `WorkoutLogApi` over
-`apiClientProvider` (mirror `plan_api.dart`/`profile_api.dart`), and have the
-session controller POST the completed sets when the workout finishes (map
-`CompletedSet`s to the log's set shape — `weight` is nullable, so omit/null it
-for bodyweight sets). Keep all I/O in the controller/API per
-no-logic-in-widgets; surface a sync error without blocking the return to idle
-(same graceful posture as the rest of the app). That closes out M6 — then open
-the PR into `dev`.
+**M6 is complete** — all five tasks are checked on branch `m6-session` (cut from
+`dev` after M5 merged via PR #5). The PR into `dev` ("Milestone M6: session") is
+the next action; a human reviews and merges. After the merge, the next run cuts
+`m7-glasses` from `dev` — but **M7 is tagged [HARDWARE-REQUIRED]** and is not
+[GATE CLEARED], so that run should print `HUMAN_GATE: M7` and stop until a human
+clears the gate.
 
-Manual logging design notes (this task, done): the no-glasses logging path.
+WorkoutLog-sync design notes (this task, done): the post-workout summary now
+persists to the backend on completion. **Server:** new `POST /workout-logs`
+(`requireAuth` → `validateWorkoutLog` → `createLog`), mounted at `/workout-logs`
+in `app.js`, wired `routes/workout-log.routes.js` →
+`controllers/workout-log.controller.js` → `services/workout-log.service.js`
+(`createLog(userId, payload)` stamps `user: userId` so the owner is never
+trusted from the body) over the existing M1 `WorkoutLog` model
+(`{user, plan?, workout?, startedAt(req), completedAt?, durationSeconds?,
+exercises:[{name, sets:[{reps?, weightKg?, completed}]}], notes?}`).
+`validators/workout-log.validators.js` mirrors the profile-validator spirit:
+`startedAt` required (ISO/epoch → Date), everything else optional, per-field
+bounds + sanity caps, and it replaces `req.body` with only the declared fields
+(strips a smuggled `user`). Returns `201 { log }`. 8 tests
+(`tests/workout-logs.test.js`): auth required, full persist + owned-to-caller,
+ignores a body `user`, minimal (startedAt-only), and four validation rejects.
+**Client:** `features/workout/workout_log_api.dart` — `WorkoutLogApi.saveLog({
+startedAt, completedAt, sets })` over `apiClientProvider` (mirrors
+`plan_api.dart`), groups the flat `List<CompletedSet>` into per-exercise blocks
+by consecutive name (preserving order), omits `weightKg` when `weight` is null
+(bodyweight), and derives `durationSeconds` from the timestamps (clamped ≥ 0);
+`workoutLogApiProvider`. The session controller
+(`workout_session_controller.dart`) captures `_startedAt` at `start()`, clears
+it at `stop()`, and fires a best-effort `_syncLog()` (`unawaited`, errors
+swallowed so a failed sync never blocks the return to idle) at **both**
+completion transitions (the last-set branch of `completeSet()` and the
+defensive completion branch of `_advance()` — mutually exclusive, so exactly one
+POST per finished workout); `_syncLog` no-ops when there's nothing recorded.
+7 new tests: 3 API wire (`workout_log_api_test.dart` — grouping + weight-omit +
+duration via `MockClient`, negative-duration clamp, non-2xx → `ApiException`) and
+4 controller (`workout_session_controller_test.dart` — syncs sets in order on
+completion + timestamp window, manual weight carried into the sync, no sync when
+stopped early, a throwing sync doesn't block completion). The existing
+`makeSession` helper now also overrides `workoutLogApiProvider` with a recording
+fake so completing-workout tests fire no real network call. `flutter analyze`
+clean, `flutter test` 199/199 green; `npm run lint` clean, `npm test` 107/107.
+
+Manual logging design notes (prior task, done): the no-glasses logging path.
 `CompletedSet` gained a nullable `double? weight` (null = unlogged/bodyweight,
 part of value identity) and `WorkoutSessionState` a transient `double? weight`
 for the *current* set (reset to null at the start of every set via a `copyWith`
@@ -432,12 +457,12 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Reads resting HR, HRV, sleep, steps, readiness proxy
 - [x] Home renders StatRings + sparklines, with empty states
 
-### M6 — Workout session engine + logging  `[ ]`
+### M6 — Workout session engine + logging  `[x]`
 - [x] `WorkoutSensorSource` interface + `MockSensorSource` defined
 - [x] Session state machine (exercise → set → rest → next)
 - [x] Focus-mode UI (RepCounter, RestTimer)
 - [x] Manual rep/weight logging fallback
-- [ ] Post-workout summary syncs to WorkoutLog
+- [x] Post-workout summary syncs to WorkoutLog
 
 ### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  `[ ]`
 - [ ] Android (Kotlin) platform channel wrapping DAT SDK (camera/audio/mic)
@@ -474,6 +499,27 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M6 · Post-workout summary syncs to WorkoutLog, completing M6. The
+  finished session now persists to the backend on completion. Server: new
+  `POST /workout-logs` (`requireAuth` → `validateWorkoutLog` → `createLog`),
+  mounted at `/workout-logs` in `app.js`, wired routes →
+  controller → `workout-log.service.js` (`createLog(userId, payload)` stamps the
+  owning user server-side, never trusting a `user` in the body) over the existing
+  M1 `WorkoutLog` model. The validator mirrors the profile-validator spirit:
+  `startedAt` required (ISO/epoch → Date), all else optional with per-field bounds
+  and sanity caps, and it replaces `req.body` with only the declared fields.
+  Returns `201 { log }`. Client: `features/workout/workout_log_api.dart` —
+  `WorkoutLogApi.saveLog({startedAt, completedAt, sets})` over `apiClientProvider`
+  (mirrors `plan_api.dart`), grouping the flat `List<CompletedSet>` into
+  per-exercise blocks by consecutive name (order preserved), omitting `weightKg`
+  for bodyweight/unlogged sets, and deriving `durationSeconds` (clamped ≥ 0). The
+  session controller captures `_startedAt` at `start()`, clears it at `stop()`,
+  and fires a best-effort `_syncLog()` (`unawaited`, errors swallowed so a failed
+  sync never blocks the return to idle) at both completion transitions — exactly
+  one POST per finished workout. 15 new tests (8 server integration; 3 client API
+  wire + 4 controller sync), and `makeSession` now stubs `workoutLogApiProvider`
+  so completing-workout tests fire no real network call. `flutter analyze` clean,
+  `flutter test` 199/199 green; `npm run lint` clean, `npm test` 107/107.
 - 2026-06-27 · M6 · Manual rep/weight logging fallback — the no-glasses logging
   path so a lifter with no sensor (or a rep the mock miscounted) can still log a
   set. `CompletedSet` gained a nullable `double? weight` (null = unlogged /

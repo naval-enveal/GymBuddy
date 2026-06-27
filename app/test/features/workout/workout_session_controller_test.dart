@@ -3,19 +3,49 @@ import 'dart:async';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/workout/session_models.dart';
+import 'package:gymbuddy/features/workout/workout_log_api.dart';
 import 'package:gymbuddy/features/workout/workout_session_controller.dart';
 import 'package:gymbuddy/sensors/mock_sensor_source.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
+
+/// Records the workouts synced to the backend, optionally failing the save to
+/// exercise the graceful-degradation path.
+class _RecordingLogApi implements WorkoutLogApi {
+  _RecordingLogApi({this.throws = false});
+
+  final bool throws;
+  final List<List<CompletedSet>> saved = <List<CompletedSet>>[];
+  DateTime? lastStartedAt;
+  DateTime? lastCompletedAt;
+
+  @override
+  Future<void> saveLog({
+    required DateTime startedAt,
+    required DateTime completedAt,
+    required List<CompletedSet> sets,
+  }) async {
+    lastStartedAt = startedAt;
+    lastCompletedAt = completedAt;
+    saved.add(List<CompletedSet>.of(sets));
+    if (throws) throw const ApiException(500, 'boom');
+  }
+}
 
 void main() {
   final fixedNow = DateTime.utc(2026, 6, 27, 9);
 
   /// A container whose sensor source is a deterministic, manually-driven mock.
-  (ProviderContainer, MockSensorSource) makeSession() {
+  /// The WorkoutLog sync is stubbed so no real network call fires on completion;
+  /// pass a [_RecordingLogApi] to assert what gets synced.
+  (ProviderContainer, MockSensorSource) makeSession({WorkoutLogApi? logApi}) {
     final mock = MockSensorSource(autoSimulate: false, clock: () => fixedNow);
     final container = ProviderContainer(
-      overrides: [workoutSensorSourceProvider.overrideWithValue(mock)],
+      overrides: [
+        workoutSensorSourceProvider.overrideWithValue(mock),
+        workoutLogApiProvider.overrideWithValue(logApi ?? _RecordingLogApi()),
+      ],
     );
     addTearDown(container.dispose);
     addTearDown(mock.dispose);
@@ -441,6 +471,106 @@ void main() {
         unawaited(mock.dispose());
         async.flushMicrotasks();
       });
+    });
+  });
+
+  group('WorkoutLog sync on completion', () {
+    test('syncs the completed sets, in order, when the workout finishes',
+        () async {
+      final log = _RecordingLogApi();
+      final (container, mock) = makeSession(logApi: log);
+      await controllerOf(container).start(planOf(exercises: const [
+        SessionExercise(
+          exercise: TrackedExercise(name: 'Squat'),
+          targetReps: 1,
+          restSeconds: 0,
+        ),
+        SessionExercise(
+          exercise: TrackedExercise(name: 'Bench'),
+          targetReps: 1,
+          restSeconds: 0,
+        ),
+      ]));
+
+      mock.emitRep(); // completes Squat, advances to Bench (zero rest)
+      await pumpEventQueue();
+      mock.emitRep(); // completes Bench → workout complete
+      await pumpEventQueue();
+
+      expect(stateOf(container).isComplete, isTrue);
+      expect(log.saved, hasLength(1));
+      expect(
+        log.saved.single.map((s) => s.exerciseName).toList(),
+        ['Squat', 'Bench'],
+      );
+      // Stamped with the session's window: completion at/after start.
+      expect(log.lastStartedAt, isNotNull);
+      expect(
+        log.lastCompletedAt!.isBefore(log.lastStartedAt!),
+        isFalse,
+      );
+    });
+
+    test('carries the manually logged weight into the synced summary',
+        () async {
+      final log = _RecordingLogApi();
+      final (container, _) = makeSession(logApi: log);
+      await controllerOf(container).start(planOf(exercises: const [
+        SessionExercise(exercise: TrackedExercise(name: 'Deadlift')),
+      ]));
+
+      controllerOf(container)
+        ..setReps(5)
+        ..setWeight(100);
+      await controllerOf(container).completeSet();
+      await pumpEventQueue();
+
+      expect(log.saved, hasLength(1));
+      final set = log.saved.single.single;
+      expect(set.reps, 5);
+      expect(set.weight, 100);
+    });
+
+    test('does not sync a workout that was stopped before completing',
+        () async {
+      final log = _RecordingLogApi();
+      final (container, mock) = makeSession(logApi: log);
+      await controllerOf(container).start(planOf(exercises: const [
+        SessionExercise(
+          exercise: TrackedExercise(name: 'Squat'),
+          sets: 3,
+          targetReps: 5,
+        ),
+      ]));
+      mock.emitRep();
+      await pumpEventQueue();
+
+      await controllerOf(container).stop();
+      await pumpEventQueue();
+
+      expect(stateOf(container).isIdle, isTrue);
+      expect(log.saved, isEmpty);
+    });
+
+    test('a failed sync does not block completion', () async {
+      final log = _RecordingLogApi(throws: true);
+      final (container, mock) = makeSession(logApi: log);
+      await controllerOf(container).start(planOf(exercises: const [
+        SessionExercise(
+          exercise: TrackedExercise(name: 'Squat'),
+          targetReps: 1,
+        ),
+      ]));
+
+      mock.emitRep();
+      await pumpEventQueue();
+
+      // The sync was attempted but threw; the session still reads complete and
+      // can return to idle without error.
+      expect(log.saved, hasLength(1));
+      expect(stateOf(container).isComplete, isTrue);
+      await controllerOf(container).stop();
+      expect(stateOf(container).isIdle, isTrue);
     });
   });
 }

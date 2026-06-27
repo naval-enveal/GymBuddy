@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/features/workout/session_models.dart';
+import 'package:gymbuddy/features/workout/workout_log_api.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 
 /// Drives a workout through the exercise → set → rest → next cycle (M6).
@@ -21,6 +22,10 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
   StreamSubscription<FormCue>? _cueSub;
   Timer? _restTimer;
 
+  /// When the active session began, captured at [start]; used to stamp the
+  /// WorkoutLog synced on completion. Null while idle.
+  DateTime? _startedAt;
+
   @override
   WorkoutSessionState build() {
     ref.onDispose(_teardown);
@@ -38,6 +43,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
     _teardown();
 
     await _source.connect();
+    _startedAt = _now();
     _repSub = _source.reps.listen(_onRep);
     _cueSub = _source.formCues.listen(_onCue);
 
@@ -94,6 +100,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
         clearFormCue: true,
       );
       await _source.stopTracking();
+      unawaited(_syncLog());
     }
   }
 
@@ -127,6 +134,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
   /// Abandons the session and returns to idle, releasing sensor listeners.
   Future<void> stop() async {
     _teardown();
+    _startedAt = null;
     await _source.stopTracking();
     state = WorkoutSessionState.idle();
   }
@@ -190,6 +198,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
 
     if (nextExercise >= state.plan.exercises.length) {
       state = state.copyWith(status: SessionStatus.completed, restRemaining: 0);
+      unawaited(_syncLog());
       return;
     }
 
@@ -204,6 +213,29 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
     );
     await _source.startTracking(state.plan.exercises[nextExercise].exercise);
   }
+
+  /// Persists the finished workout's summary to the backend. Best-effort: a
+  /// failed sync must not block the return to idle (same graceful posture as the
+  /// rest of the app — the summary is still shown locally, it just isn't saved).
+  /// No-op when there's nothing to record.
+  Future<void> _syncLog() async {
+    final startedAt = _startedAt;
+    final sets = state.completedSets;
+    if (startedAt == null || sets.isEmpty) return;
+    try {
+      await ref.read(workoutLogApiProvider).saveLog(
+            startedAt: startedAt,
+            completedAt: _now(),
+            sets: sets,
+          );
+    } catch (_) {
+      // Swallow: the workout is over and the user is returning to idle; a
+      // network failure here shouldn't surface as a blocking error.
+    }
+  }
+
+  /// Wall-clock now. Wrapped so the timestamps are easy to reason about.
+  DateTime _now() => DateTime.now();
 
   void _teardown() {
     _restTimer?.cancel();
