@@ -7,9 +7,10 @@ import 'package:gymbuddy/features/vitals/vitals_permission_controller.dart';
 
 /// Fake reader returning a configured snapshot and counting reads.
 class _FakeVitalsReader implements VitalsReader {
-  _FakeVitalsReader(this._reading);
+  _FakeVitalsReader(this._reading, {this.series = VitalsSeries.empty});
 
   VitalsReading _reading;
+  VitalsSeries series;
   int reads = 0;
 
   set reading(VitalsReading r) => _reading = r;
@@ -19,6 +20,9 @@ class _FakeVitalsReader implements VitalsReader {
     reads++;
     return _reading;
   }
+
+  @override
+  Future<VitalsSeries> readSeries() async => series;
 }
 
 /// Grants on request, so a test can flip the permission gate to granted.

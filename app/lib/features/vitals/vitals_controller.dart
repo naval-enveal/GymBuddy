@@ -11,10 +11,17 @@ import 'package:gymbuddy/features/vitals/vitals_permission_controller.dart';
 /// sleep) is available to base it on.
 @immutable
 class VitalsSnapshot {
-  const VitalsSnapshot({required this.reading, this.readiness});
+  const VitalsSnapshot({
+    required this.reading,
+    this.series = VitalsSeries.empty,
+    this.readiness,
+  });
 
-  /// The metrics read from the health store.
+  /// The current metrics read from the health store.
   final VitalsReading reading;
+
+  /// Recent daily history per metric, feeding the dashboard sparklines.
+  final VitalsSeries series;
 
   /// A 0–100 readiness proxy derived from [reading], or null when there's no
   /// recovery signal to compute it from.
@@ -27,10 +34,11 @@ class VitalsSnapshot {
   bool operator ==(Object other) =>
       other is VitalsSnapshot &&
       other.reading == reading &&
+      other.series == series &&
       other.readiness == readiness;
 
   @override
-  int get hashCode => Object.hash(reading, readiness);
+  int get hashCode => Object.hash(reading, series, readiness);
 }
 
 /// Derives a rough 0–100 "readiness" proxy from recovery signals.
@@ -100,8 +108,17 @@ class VitalsController extends AsyncNotifier<VitalsSnapshot> {
   }
 
   Future<VitalsSnapshot> _load() async {
-    final reading = await ref.read(vitalsReaderProvider).read();
-    return VitalsSnapshot(reading: reading, readiness: computeReadiness(reading));
+    final reader = ref.read(vitalsReaderProvider);
+    // Read the current values and the daily history concurrently.
+    final readingFuture = reader.read();
+    final seriesFuture = reader.readSeries();
+    final reading = await readingFuture;
+    final series = await seriesFuture;
+    return VitalsSnapshot(
+      reading: reading,
+      series: series,
+      readiness: computeReadiness(reading),
+    );
   }
 }
 

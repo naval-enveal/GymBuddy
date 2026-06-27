@@ -23,4 +23,5 @@ export 'widgets/metric_tile.dart';
 export 'widgets/primary_button.dart';
 export 'widgets/rep_counter.dart';
 export 'widgets/rest_timer.dart';
+export 'widgets/sparkline.dart';
 export 'widgets/stat_ring.dart';
