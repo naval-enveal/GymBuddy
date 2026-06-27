@@ -12,6 +12,11 @@ const String kGlassesRepsChannel = 'gymbuddy/glasses/reps';
 /// Streaming form cues: `{severity, message}`.
 const String kGlassesFormCuesChannel = 'gymbuddy/glasses/formCues';
 
+/// Streaming wake-word triggers from the always-on mic: `{timestampMs, phrase,
+/// confidence?}`. Independent of tracking — the second input path from the
+/// glasses, a control signal that opens a hands-free Q&A turn.
+const String kGlassesWakeChannel = 'gymbuddy/glasses/wake';
+
 /// The real, glasses-backed [WorkoutSensorSource]: a thin Dart binding over the
 /// platform channels the Android (Kotlin) and iOS (Swift) sides expose for the
 /// Meta DAT SDK.
@@ -29,14 +34,17 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     MethodChannel? methodChannel,
     EventChannel? repsChannel,
     EventChannel? formCuesChannel,
+    EventChannel? wakeChannel,
   })  : _methods = methodChannel ?? const MethodChannel(kGlassesMethodChannel),
         _repsChannel = repsChannel ?? const EventChannel(kGlassesRepsChannel),
         _formCuesChannel =
-            formCuesChannel ?? const EventChannel(kGlassesFormCuesChannel);
+            formCuesChannel ?? const EventChannel(kGlassesFormCuesChannel),
+        _wakeChannel = wakeChannel ?? const EventChannel(kGlassesWakeChannel);
 
   final MethodChannel _methods;
   final EventChannel _repsChannel;
   final EventChannel _formCuesChannel;
+  final EventChannel _wakeChannel;
 
   /// Populated by [connect] from the native handshake; conservatively empty
   /// until then so capability-gated UI never shows before we've connected.
@@ -45,6 +53,7 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
 
   Stream<RepEvent>? _reps;
   Stream<FormCue>? _formCues;
+  Stream<WakeEvent>? _wake;
   bool _disposed = false;
 
   @override
@@ -57,6 +66,10 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   @override
   Stream<FormCue> get formCues =>
       _formCues ??= _formCuesChannel.receiveBroadcastStream().map(_decodeFormCue);
+
+  @override
+  Stream<WakeEvent> get wakeEvents =>
+      _wake ??= _wakeChannel.receiveBroadcastStream().map(_decodeWake);
 
   @override
   Future<SensorAvailability> connect() async {
@@ -146,6 +159,20 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     return FormCue(
       severity: _severityFrom(map['severity'] as String?),
       message: (map['message'] as String?) ?? '',
+    );
+  }
+
+  WakeEvent _decodeWake(dynamic event) {
+    final map = (event as Map).cast<Object?, Object?>();
+    return WakeEvent(
+      // The native side fires only on the configured phrase; default to
+      // [kWakePhrase] if it omits it so a trigger is never dropped for a missing
+      // label.
+      phrase: (map['phrase'] as String?) ?? kWakePhrase,
+      timestamp: DateTime.fromMillisecondsSinceEpoch(
+        (map['timestampMs'] as num).toInt(),
+      ),
+      confidence: (map['confidence'] as num?)?.toDouble(),
     );
   }
 

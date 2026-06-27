@@ -45,6 +45,9 @@ class _FakeSensorSource implements WorkoutSensorSource {
   Stream<FormCue> get formCues => const Stream<FormCue>.empty();
 
   @override
+  Stream<WakeEvent> get wakeEvents => const Stream<WakeEvent>.empty();
+
+  @override
   Future<void> startTracking(TrackedExercise exercise) async {}
 
   @override

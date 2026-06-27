@@ -14,26 +14,61 @@
 ---
 
 ## Next up
-**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–5 are done:
+**M7 is in progress** on branch `m7-glasses` (cut from `dev`). Tasks 1–6 are done:
 both native sides mirror the `gymbuddy/glasses` wire contract, the Dart
 `MetaGlassesSensorSource` binds to those channels, the composition root probes the
-glasses once and falls back to `MockSensorSource` when they're unavailable, and
-the first *output* path — `playCue` audio over the glasses speakers — is wired end
-to end through the same seam. **Next: task 6 — custom mic-based wake trigger for
-Q&A.** This is the second input path *from* the glasses, but a control one rather
-than a tracking one: the glasses' mic listens for a wake phrase ("hey buddy"),
-which should open a hands-free Q&A turn (the actual Q&A round-trip is M9/AI). It
-needs a native trigger on `gymbuddy/glasses` — most likely a third `EventChannel`
-(e.g. `gymbuddy/glasses/wake`) emitting a wake event, since wake detection is an
-asynchronous push from the DAT SDK's always-on mic, not a request/response — plus
-a Dart affordance to expose it (a `Stream` on `WorkoutSensorSource`, mirroring
-`reps`/`formCues`). Keep the mock-first rule: `MockSensorSource` must surface the
-wake stream too (driveable in tests, like `emitRep`/`emitFormCue`) so Q&A wiring
-runs with no hardware, and the glasses source degrades to an empty/never-firing
-stream when the SDK is absent. Decide where the wake-trigger config lives (the
-phrase may be fixed for now). Native Kotlin/Swift still can't be compiled headless
-(no Android SDK / Xcode) — the verifiable gate stays `flutter analyze` +
-`flutter test`.
+glasses once and falls back to `MockSensorSource` when they're unavailable, the
+first *output* path (`playCue` audio over the speakers) is wired end to end, and
+the second *input* path (the mic-based wake trigger for Q&A) is now wired through
+the same seam. **Next: task 7 — "App builds + runs with no hardware present"**, the
+last M7 task. This is largely an *audit/confirmation* task: every layer was built
+mock-first, so the app already resolves `MockSensorSource` whenever the glasses
+report `unavailable` (every headless build). Confirm `flutter analyze` +
+`flutter test` stay green, that `resolveWorkoutSensorSource` falls back cleanly,
+and that no feature code assumes hardware (the guardrail). Note the native build
+can't be compiled headless (no Android SDK / Xcode), so the verifiable gate stays
+the Dart side. Consider whether an explicit "hardware-free smoke" test or doc note
+is warranted, or whether the existing resolver/mock tests already discharge it —
+if so, just check the box. When task 7 is checked, **M7 is fully complete**: open a
+PR from `m7-glasses` into `dev` titled "Milestone M7: glasses" and stop for human
+review (don't merge, don't cut M8).
+
+Wake-trigger design notes (task 6, done): the second *input* path from the
+glasses — a control signal, not a tracking one. The mic listens for a fixed wake
+phrase (`kWakePhrase` = "hey buddy") and pushes a `WakeEvent` that opens a
+hands-free Q&A turn (the Q&A round-trip itself is M9/AI). Because wake detection
+is an asynchronous push from the DAT SDK's always-on mic — and independent of
+`startTracking` (the wearer asks between sets) — it's a **third `EventChannel`**,
+`gymbuddy/glasses/wake` (`{timestampMs, phrase, confidence?}`), not a
+request/response on the control channel. **Dart:** `sensor_source.dart` gained a
+`const kWakePhrase` (single source of truth, one place to grow into per-user
+config later), a `WakeEvent` value type (`{phrase, timestamp, confidence?}`,
+value-equality), and a `Stream<WakeEvent> get wakeEvents` on
+`WorkoutSensorSource`, mirroring `reps`/`formCues`. `MockSensorSource` surfaces a
+real broadcast `wakeEvents` plus an `emitWake({phrase, confidence})` emitter —
+driveable in tests like `emitRep`/`emitFormCue`, but **independent of tracking**
+(no `startTracking` needed; only `dispose` stops it), so Q&A wiring runs with no
+hardware; it is deliberately **not** auto-simulated (a random wake mid-dev would
+be noise). `MetaGlassesSensorSource` adds `kGlassesWakeChannel`, an injectable
+`wakeChannel`, and a lazily-cached broadcast `wakeEvents` decoding
+`{timestampMs, phrase, confidence?}` (phrase defaults to `kWakePhrase` if the
+native side omits it, so a trigger is never dropped). The glasses source degrades
+to an empty/never-firing stream when the SDK is absent (native emits nothing).
+**Native:** Kotlin/Swift `DatSdkClient` gained `setWakeListener(listener?)`
+(separate from the `startTracking` `TrackingListener` because wake is always-on)
+and a `WakeSample`/`WakeListener` pair; `Unavailable*` never calls back (empty
+stream with no hardware), `DatSdkAvailable*` stores it (TODO: arm the SDK's
+wake-word engine for the fixed phrase, exposed as `WAKE_PHRASE`/`wakePhrase`).
+Both `GlassesChannel`s wire the new `gymbuddy/glasses/wake` `EventChannel` and arm
+the wake listener only while Flutter is listening (Android on `onListen`/
+`onCancel`; iOS via new optional `onListen`/`onCancel` closures on
+`QueuingStreamHandler`), posting each detection onto the main thread; both
+`dispose()`s clear it; wire-contract doc updated in both headers. 7 new Dart tests
+(meta: decode + phrase-default + broadcast; mock: `emitWake` independent-of-
+tracking + overridden phrase/confidence + broadcast + `WakeEvent` equality);
+`_FakeSensorSource` in the resolver test gained the `wakeEvents` override.
+`flutter analyze` clean, `flutter test` 228/228 green (native isn't compilable
+headless — the Dart gate is what's verified).
 
 Audio-cue design notes (task 5, done): the first *output* path back to the
 glasses. Rather than a sibling interface, `playCue(String message)` was added to
@@ -627,7 +662,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] `MetaGlassesSensorSource` implements `WorkoutSensorSource`
 - [x] Capability detection + fallback to MockSensorSource
 - [x] Audio cue playback through glasses speakers
-- [ ] Custom mic-based wake trigger for Q&A
+- [x] Custom mic-based wake trigger for Q&A
 - [ ] App builds + runs with no hardware present
 
 ### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  `[ ]`
@@ -656,6 +691,27 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M7 · Custom mic-based wake trigger for Q&A — the second *input*
+  path from the glasses, a control signal (not a tracking one). The always-on mic
+  listens for a fixed wake phrase (`kWakePhrase` = "hey buddy") and pushes a
+  `WakeEvent` that opens a hands-free Q&A turn (the Q&A round-trip itself is
+  M9/AI). Because it's an async push independent of `startTracking`, it's a third
+  `EventChannel` `gymbuddy/glasses/wake` (`{timestampMs, phrase, confidence?}`),
+  not a request/response. Dart: `sensor_source.dart` gained `kWakePhrase`, a
+  `WakeEvent` value type, and `Stream<WakeEvent> get wakeEvents` on
+  `WorkoutSensorSource` (mirrors `reps`/`formCues`); `MockSensorSource` surfaces a
+  broadcast `wakeEvents` + an `emitWake({phrase, confidence})` emitter that is
+  independent of tracking (Q&A wiring runs with no hardware) and not
+  auto-simulated; `MetaGlassesSensorSource` decodes the wake channel (phrase
+  defaults to `kWakePhrase` if omitted) and degrades to an empty stream with no
+  SDK. Native: Kotlin/Swift `DatSdkClient` gained `setWakeListener` +
+  `WakeSample`/`WakeListener` (`Unavailable*` never fires, `DatSdkAvailable*`
+  stores it as a TODO over the SDK wake-word engine, phrase exposed as
+  `WAKE_PHRASE`/`wakePhrase`); both `GlassesChannel`s wire the new channel, arming
+  the listener only while Flutter is listening, posting on the main thread, and
+  clearing on dispose; wire-contract docs updated. 7 new Dart tests (+ resolver
+  fake override). `flutter analyze` clean, `flutter test` 228/228 green (native
+  isn't compilable headless — the Dart gate is verified).
 - 2026-06-27 · M7 · Audio cue playback through the glasses speakers — the first
   *output* path back to the hardware. `playCue(String message)` was added to the
   `WorkoutSensorSource` seam (so the session/coach layer reaches the speakers

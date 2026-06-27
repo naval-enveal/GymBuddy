@@ -10,6 +10,7 @@ void main() {
   const methodChannel = MethodChannel(kGlassesMethodChannel);
   const repsChannel = EventChannel(kGlassesRepsChannel);
   const formCuesChannel = EventChannel(kGlassesFormCuesChannel);
+  const wakeChannel = EventChannel(kGlassesWakeChannel);
 
   // Records the control-channel traffic the source emits, and replies with
   // whatever the current test queued up.
@@ -29,6 +30,7 @@ void main() {
     messenger.setMockMethodCallHandler(methodChannel, null);
     messenger.setMockStreamHandler(repsChannel, null);
     messenger.setMockStreamHandler(formCuesChannel, null);
+    messenger.setMockStreamHandler(wakeChannel, null);
   });
 
   group('connect', () {
@@ -295,6 +297,75 @@ void main() {
       );
       final source = MetaGlassesSensorSource();
       expect(source.formCues.isBroadcast, isTrue);
+    });
+  });
+
+  group('wake event stream', () {
+    test('decodes native wake maps onto WakeEvent', () {
+      messenger.setMockStreamHandler(
+        wakeChannel,
+        MockStreamHandler.inline(
+          onListen: (arguments, sink) {
+            sink
+              ..success(<String, Object?>{
+                'timestampMs': 1000,
+                'phrase': 'hey buddy',
+                'confidence': 0.88,
+              })
+              ..success(<String, Object?>{
+                'timestampMs': 2000,
+                'phrase': 'hey buddy',
+              });
+          },
+        ),
+      );
+      final source = MetaGlassesSensorSource();
+
+      expect(
+        source.wakeEvents,
+        emitsInOrder(<WakeEvent>[
+          WakeEvent(
+            phrase: 'hey buddy',
+            timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+            confidence: 0.88,
+          ),
+          WakeEvent(
+            phrase: 'hey buddy',
+            timestamp: DateTime.fromMillisecondsSinceEpoch(2000),
+          ),
+        ]),
+      );
+    });
+
+    test('defaults to the wake phrase when the native side omits it', () {
+      messenger.setMockStreamHandler(
+        wakeChannel,
+        MockStreamHandler.inline(
+          onListen: (arguments, sink) {
+            sink.success(<String, Object?>{'timestampMs': 1000});
+          },
+        ),
+      );
+      final source = MetaGlassesSensorSource();
+
+      expect(
+        source.wakeEvents,
+        emits(
+          WakeEvent(
+            phrase: kWakePhrase,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        ),
+      );
+    });
+
+    test('wakeEvents is a broadcast stream', () {
+      messenger.setMockStreamHandler(
+        wakeChannel,
+        MockStreamHandler.inline(onListen: (arguments, sink) {}),
+      );
+      final source = MetaGlassesSensorSource();
+      expect(source.wakeEvents.isBroadcast, isTrue);
     });
   });
 }

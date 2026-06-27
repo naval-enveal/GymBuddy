@@ -34,6 +34,8 @@ class MockSensorSource implements WorkoutSensorSource {
   final StreamController<RepEvent> _reps = StreamController<RepEvent>.broadcast();
   final StreamController<FormCue> _formCues =
       StreamController<FormCue>.broadcast();
+  final StreamController<WakeEvent> _wakeEvents =
+      StreamController<WakeEvent>.broadcast();
 
   Timer? _timer;
   TrackedExercise? _tracking;
@@ -49,6 +51,9 @@ class MockSensorSource implements WorkoutSensorSource {
 
   @override
   Stream<FormCue> get formCues => _formCues.stream;
+
+  @override
+  Stream<WakeEvent> get wakeEvents => _wakeEvents.stream;
 
   @override
   Future<SensorAvailability> connect() async {
@@ -100,6 +105,17 @@ class MockSensorSource implements WorkoutSensorSource {
     _formCues.add(cue);
   }
 
+  /// Emits a wake-word trigger, as if the wearer said the wake phrase. Unlike
+  /// [emitRep]/[emitFormCue] this is independent of tracking — the mic is
+  /// always-on — so it fires whenever the source is live; only [dispose] stops
+  /// it. Lets Q&A wiring be exercised end to end with no glasses attached.
+  void emitWake({String phrase = kWakePhrase, double? confidence}) {
+    if (_disposed) return;
+    _wakeEvents.add(
+      WakeEvent(phrase: phrase, timestamp: clock(), confidence: confidence),
+    );
+  }
+
   void _tick() {
     emitRep(confidence: 0.95);
     // A periodic reassurance cue keeps the form UI alive for form-tracked
@@ -128,5 +144,6 @@ class MockSensorSource implements WorkoutSensorSource {
     _tracking = null;
     await _reps.close();
     await _formCues.close();
+    await _wakeEvents.close();
   }
 }

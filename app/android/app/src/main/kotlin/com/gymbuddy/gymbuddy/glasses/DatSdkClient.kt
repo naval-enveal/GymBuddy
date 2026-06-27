@@ -39,11 +39,29 @@ data class FormCueSample(
     val message: String,
 )
 
+/** A wake-word trigger from the glasses' always-on mic. Mirrors the Dart
+ *  `WakeEvent`: a control signal (not a tracking one) that opens a hands-free
+ *  Q&A turn. */
+data class WakeSample(
+    val timestampMs: Long,
+    /** The recognized wake phrase that fired the trigger. */
+    val phrase: String,
+    /** Detection confidence in 0..1, or null if the pipeline doesn't score it. */
+    val confidence: Double?,
+)
+
 /** Callbacks the [DatSdkClient] invokes as the glasses pipeline produces events.
  *  The channel forwards these to the Flutter event sinks. */
 interface TrackingListener {
     fun onRep(sample: RepSample)
     fun onFormCue(cue: FormCueSample)
+}
+
+/** Callback the [DatSdkClient] invokes when the always-on mic detects the wake
+ *  phrase. Separate from [TrackingListener] because wake detection is a control
+ *  signal independent of tracking — the mic listens between sets too. */
+interface WakeListener {
+    fun onWake(sample: WakeSample)
 }
 
 /**
@@ -71,6 +89,15 @@ interface DatSdkClient {
     fun stopTracking()
 
     /**
+     * Registers (or clears, with null) the listener for wake-phrase triggers from
+     * the always-on mic. Independent of [startTracking] — once a [WakeListener] is
+     * set the client may fire [WakeListener.onWake] at any time while connected,
+     * including between sets. A client with no mic ([UnavailableDatSdkClient])
+     * simply never calls back, so the wake stream stays empty with no hardware.
+     */
+    fun setWakeListener(listener: WakeListener?)
+
+    /**
      * Speaks a short coaching cue through the glasses' speakers — the first output
      * path back to the hardware. Best-effort: a client with no audio route (e.g.
      * [UnavailableDatSdkClient]) does nothing, so the Dart layer can fire cues
@@ -96,6 +123,14 @@ interface DatSdkClient {
             Log.i(TAG, "DAT SDK present on classpath: $present")
             return if (present) DatSdkAvailable(context) else UnavailableDatSdkClient()
         }
+
+        /**
+         * The wake phrase the always-on mic listens for to open a hands-free Q&A
+         * turn. Fixed for now (Q&A lands in M9); kept here as the single native
+         * source of truth, mirroring the Dart `kWakePhrase`, so it has one place
+         * to grow into per-user config later.
+         */
+        const val WAKE_PHRASE = "hey buddy"
 
         /** The DAT SDK entry-point class name. Detected, never linked at compile time. */
         private const val DAT_SDK_CLASS = "com.meta.wearables.dat.DeviceAccessToolkit"
@@ -133,6 +168,10 @@ internal class UnavailableDatSdkClient : DatSdkClient {
 
     override fun stopTracking() {}
 
+    override fun setWakeListener(listener: WakeListener?) {
+        // No mic, no wake events. The wake stream stays empty with no hardware.
+    }
+
     override fun playCue(message: String) {
         // No glasses, no speakers. Cues degrade to a silent no-op.
     }
@@ -152,6 +191,7 @@ internal class UnavailableDatSdkClient : DatSdkClient {
  */
 internal class DatSdkAvailable(private val context: Context) : DatSdkClient {
     @Volatile private var listener: TrackingListener? = null
+    @Volatile private var wakeListener: WakeListener? = null
 
     override fun connect(): GlassesAvailability {
         // Real DAT session/handshake goes here once the SDK is vendored. Until the
@@ -171,7 +211,15 @@ internal class DatSdkAvailable(private val context: Context) : DatSdkClient {
 
     override fun stopTracking() {
         this.listener = null
-        // Real impl: pause the camera/mic pipeline.
+        // Real impl: pause the camera/mic pipeline. The wake listener stays
+        // registered — the mic keeps listening between sets.
+    }
+
+    override fun setWakeListener(listener: WakeListener?) {
+        this.wakeListener = listener
+        // Real impl: arm the DAT SDK's always-on mic / wake-word engine for
+        // DatSdkClient.WAKE_PHRASE and call wakeListener.onWake on each detection
+        // (independent of startTracking); clear the engine when listener is null.
     }
 
     override fun playCue(message: String) {
@@ -181,6 +229,7 @@ internal class DatSdkAvailable(private val context: Context) : DatSdkClient {
 
     override fun dispose() {
         this.listener = null
+        this.wakeListener = null
         // Real impl: tear down the DAT session and release camera/audio/mic.
     }
 }

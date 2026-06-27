@@ -24,6 +24,7 @@ import io.flutter.plugin.common.MethodChannel
  *      `dispose`       -> null
  *  - event channel `gymbuddy/glasses/reps`     -> { index: Int, timestampMs: Long, confidence: Double? }
  *  - event channel `gymbuddy/glasses/formCues` -> { severity: String, message: String }
+ *  - event channel `gymbuddy/glasses/wake`     -> { timestampMs: Long, phrase: String, confidence: Double? }
  *
  * Because the DAT SDK isn't bundled in a no-hardware build, [connect] resolves to
  * `unavailable` and no events are emitted — the Dart layer then falls back to the
@@ -67,6 +68,24 @@ class GlassesChannel(
         })
     }
 
+    // The wake channel is its own stream because wake detection is always-on and
+    // independent of tracking; the listener is armed only while Flutter is
+    // listening, and torn down on cancel.
+    private var wakeSink: EventChannel.EventSink? = null
+    private val wakeChannel = EventChannel(messenger, WAKE_CHANNEL).apply {
+        setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                wakeSink = events
+                client.setWakeListener(wakeListener)
+            }
+
+            override fun onCancel(arguments: Any?) {
+                client.setWakeListener(null)
+                wakeSink = null
+            }
+        })
+    }
+
     /** Forwards DAT SDK events onto the Flutter sinks; sink calls must hit the main thread. */
     private val trackingListener = object : TrackingListener {
         override fun onRep(sample: RepSample) {
@@ -87,6 +106,21 @@ class GlassesChannel(
                     mapOf(
                         "severity" to cue.severity,
                         "message" to cue.message,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Forwards always-on-mic wake triggers onto the wake sink (main thread). */
+    private val wakeListener = object : WakeListener {
+        override fun onWake(sample: WakeSample) {
+            mainHandler.post {
+                wakeSink?.success(
+                    mapOf(
+                        "timestampMs" to sample.timestampMs,
+                        "phrase" to sample.phrase,
+                        "confidence" to sample.confidence,
                     ),
                 )
             }
@@ -149,8 +183,11 @@ class GlassesChannel(
         methodChannel.setMethodCallHandler(null)
         repsChannel.setStreamHandler(null)
         formCuesChannel.setStreamHandler(null)
+        wakeChannel.setStreamHandler(null)
+        client.setWakeListener(null)
         repsSink = null
         formCuesSink = null
+        wakeSink = null
         client.dispose()
     }
 
@@ -158,5 +195,6 @@ class GlassesChannel(
         const val METHOD_CHANNEL = "gymbuddy/glasses"
         const val REPS_CHANNEL = "gymbuddy/glasses/reps"
         const val FORM_CUES_CHANNEL = "gymbuddy/glasses/formCues"
+        const val WAKE_CHANNEL = "gymbuddy/glasses/wake"
     }
 }

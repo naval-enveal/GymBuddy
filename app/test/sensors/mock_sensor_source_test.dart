@@ -54,6 +54,17 @@ void main() {
         isNot(const FormCue(severity: FormSeverity.major, message: 'Slow down')),
       );
     });
+
+    test('WakeEvent has value equality', () {
+      expect(
+        WakeEvent(phrase: kWakePhrase, timestamp: fixedNow, confidence: 0.9),
+        WakeEvent(phrase: kWakePhrase, timestamp: fixedNow, confidence: 0.9),
+      );
+      expect(
+        WakeEvent(phrase: kWakePhrase, timestamp: fixedNow),
+        isNot(WakeEvent(phrase: 'ok buddy', timestamp: fixedNow)),
+      );
+    });
   });
 
   group('MockSensorSource contract', () {
@@ -140,6 +151,43 @@ void main() {
       await pumpEventQueue();
       expect(cues, [cue]);
       await sub.cancel();
+    });
+
+    test('emitWake fires a wake event independent of tracking', () async {
+      final source =
+          MockSensorSource(autoSimulate: false, clock: () => fixedNow);
+      addTearDown(source.dispose);
+      final wakes = <WakeEvent>[];
+      final sub = source.wakeEvents.listen(wakes.add);
+
+      // The mic is always-on, so no startTracking is needed to wake.
+      source.emitWake();
+      await pumpEventQueue();
+
+      expect(wakes, [WakeEvent(phrase: kWakePhrase, timestamp: fixedNow)]);
+      await sub.cancel();
+    });
+
+    test('emitWake carries an overridden phrase and confidence', () async {
+      final source =
+          MockSensorSource(autoSimulate: false, clock: () => fixedNow);
+      addTearDown(source.dispose);
+      final wakes = <WakeEvent>[];
+      final sub = source.wakeEvents.listen(wakes.add);
+
+      source.emitWake(phrase: 'ok buddy', confidence: 0.7);
+      await pumpEventQueue();
+
+      expect(wakes, [
+        WakeEvent(phrase: 'ok buddy', timestamp: fixedNow, confidence: 0.7),
+      ]);
+      await sub.cancel();
+    });
+
+    test('wakeEvents is a broadcast stream', () {
+      final source = MockSensorSource(autoSimulate: false);
+      addTearDown(source.dispose);
+      expect(source.wakeEvents.isBroadcast, isTrue);
     });
 
     test('playCue is a silent no-op (no speakers on the mock)', () async {
