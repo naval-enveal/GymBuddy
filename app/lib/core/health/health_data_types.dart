@@ -8,13 +8,28 @@ import 'package:health/health.dart';
 ///
 /// HealthKit and Health Connect expose HRV under different types — HealthKit
 /// records SDNN, Health Connect records RMSSD — so the requested set is resolved
-/// per platform. Keeping this list in one place means the permission request
-/// (this task) and the later data reads ask for exactly the same types.
+/// per platform. Keeping these in one place means the permission request and the
+/// data reads (the M5 read layer) ask for exactly the same types.
+
+/// Resting heart rate, in bpm.
+const HealthDataType restingHeartRateType = HealthDataType.RESTING_HEART_RATE;
+
+/// Heart-rate variability, in ms. HealthKit records SDNN; Health Connect records
+/// RMSSD — resolved per platform so the request and the reads agree.
+HealthDataType get hrvType => Platform.isAndroid
+    ? HealthDataType.HEART_RATE_VARIABILITY_RMSSD
+    : HealthDataType.HEART_RATE_VARIABILITY_SDNN;
+
+/// Time asleep — segments summed into a night's total.
+const HealthDataType sleepAsleepType = HealthDataType.SLEEP_ASLEEP;
+
+/// Step count.
+const HealthDataType stepsType = HealthDataType.STEPS;
+
+/// The full set of [HealthDataType]s the dashboard requests and reads.
 List<HealthDataType> vitalsHealthTypes() => <HealthDataType>[
-      HealthDataType.RESTING_HEART_RATE,
-      Platform.isAndroid
-          ? HealthDataType.HEART_RATE_VARIABILITY_RMSSD
-          : HealthDataType.HEART_RATE_VARIABILITY_SDNN,
-      HealthDataType.SLEEP_ASLEEP,
-      HealthDataType.STEPS,
+      restingHeartRateType,
+      hrvType,
+      sleepAsleepType,
+      stepsType,
     ];

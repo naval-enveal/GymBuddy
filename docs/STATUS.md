@@ -15,16 +15,59 @@
 
 ## Next up
 **M5 · Vitals dashboard is underway** on branch `m5-vitals` (cut from `dev`
-after PR #4 merged M4). Permission handling now ships with graceful denied/
-unavailable states. The next unchecked task is **Reads resting HR, HRV, sleep,
-steps, readiness proxy** — add the data-read layer behind the `health` package
-(reuse `vitalsHealthTypes()` so the reads ask for exactly the metrics the
-permission flow requested), expose it through a vitals controller, and compute a
-readiness proxy. Gate the reads on `vitalsPermissionControllerProvider.isGranted`
-(the `VitalsPermissionGate` only reveals the dashboard once granted) and keep
-empty/missing-metric states working when a metric isn't recorded.
+after PR #4 merged M4). The data-read layer + readiness proxy now ship. The next
+(and final M5) unchecked task is **Home renders StatRings + sparklines, with
+empty states** — replace the granted-state placeholder in `home_screen.dart`
+with the real dashboard. Watch `vitalsControllerProvider` (`AsyncNotifier<
+VitalsSnapshot>`, `features/vitals/vitals_controller.dart`): render its
+`AsyncValue` via `.when` (spinner / retryable error / loaded), draw the readiness
+proxy + each metric as `StatRing`s (the design-system widget already exists in
+`core/design/`), and show a per-metric empty state when that field is null
+(`VitalsReading` fields are all nullable — a metric the user hasn't recorded must
+not show a fake zero). Sparklines need a short series; this task's reader returns
+*scalar* current values only, so either add a series read to the reader (extend
+`VitalsReadClient.samples` is already series-shaped — surface the daily history)
+or scope sparklines to what's available. Wire pull-to-refresh to
+`VitalsController.refresh()`.
 
-Permission-flow design notes (this task, done): the vitals feature
+Data-read design notes (this task, done): the read layer lives behind the
+`health` package in `core/health/vitals_reader.dart` (feature code never touches
+HealthKit/Health Connect directly, same rule as the sensor + permission layers).
+`vitals_reader.dart` exposes: `VitalsReading` (the four nullable scalars — resting
+HR bpm, HRV ms, last-night sleep hours, today's steps — `null` = not recorded, so
+the UI shows empty rather than a fake zero; `hasAny`/`empty`/value-equality);
+`VitalsReader` (`Future<VitalsReading> read()`, contracted never to throw);
+`HealthPackageVitalsReader` (real impl over a `VitalsReadClient` seam +
+injectable `clock` for deterministic windowing) — it reads each metric
+independently and `_guard`s each one, so one unsupported/failing type degrades to
+`null` instead of blanking the snapshot; resting HR/HRV take the latest sample in
+a 7-day window, sleep sums SLEEP_ASLEEP segment durations over the past day,
+steps sum since local midnight. The `VitalsReadClient` seam returns normalized
+`HealthSample`s (value/start/end off the package's `HealthDataPoint`/
+`NumericHealthValue`) so reduction is unit-testable without the method channel;
+`LiveVitalsReadClient` wraps `Health()` and configures lazily. `MockVitalsReader`
+is the **provider default** (fixed plausible snapshot → populated dashboard in
+tests + hardware-free dev); `main.dart` overrides `vitalsReaderProvider` to the
+real reader, exactly like the permission-service override. The readiness proxy is
+computed in the controller via the pure `computeReadiness(VitalsReading)`: a rough
+0–100 blend of the recovery signals only (HRV higher-is-better 20→100ms, resting
+HR lower-is-better 80→40bpm, sleep 0→8h), averaging just the present sub-scores,
+`null` when none are available — steps are activity, not recovery, so excluded by
+design. `vitals_controller.dart` adds `VitalsSnapshot` (`reading` + derived
+`readiness`) and `VitalsController extends AsyncNotifier<VitalsSnapshot>`:
+`build()` `ref.watch`es `vitalsPermissionControllerProvider.isGranted` and stays
+`VitalsSnapshot.empty` (firing NO read) until granted — so the gate, not a
+premature platform read, drives connecting; on grant it rebuilds, reads, and
+computes readiness. `refresh()` re-reads (pull-to-refresh), a no-op while not
+granted. 17 tests: 6 reader (`test/core/health/vitals_reader_test.dart` — all
+metrics/latest-wins/sleep-sum/steps-sum, missing→null, all-empty, per-metric
+failure isolated, zero-duration sleep, mock populated) and 11 controller
+(`test/features/vitals/vitals_controller_test.dart` — 5 readiness: blend, top,
+partial, clamp, null-when-no-recovery; 6 controller: empty-until-granted +
+no-read, reads+readiness on grant, missing metrics preserved, refresh re-reads,
+refresh no-op ungranted).
+
+Permission-flow design notes (prior task, done): the vitals feature
 (`app/lib/features/vitals/`) gates the dashboard on health access on top of the
 real `healthPermissionServiceProvider`. `vitals_permission_controller.dart` adds
 `VitalsPermissionController` (`Notifier<VitalsPermissionState>`) — state starts
@@ -218,7 +261,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M5 — Vitals dashboard  `[ ]`
 - [x] `health` package integrated (HealthKit + Health Connect)
 - [x] Permission handling with graceful denied state
-- [ ] Reads resting HR, HRV, sleep, steps, readiness proxy
+- [x] Reads resting HR, HRV, sleep, steps, readiness proxy
 - [ ] Home renders StatRings + sparklines, with empty states
 
 ### M6 — Workout session engine + logging  `[ ]`
@@ -263,6 +306,50 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M5 · Vitals data-read layer + readiness proxy. New
+  `core/health/vitals_reader.dart` reads the dashboard's metrics behind the
+  `health` package (feature code never touches HealthKit/Health Connect directly,
+  same rule as the sensor + permission layers). `VitalsReading` holds four
+  nullable scalars — resting HR (bpm), HRV (ms), last-night sleep (hours),
+  today's steps — where `null` means *not recorded*, so a metric the user hasn't
+  logged shows an empty state rather than a fabricated zero. `VitalsReader`
+  (`Future<VitalsReading> read()`, contracted never to throw) has a real
+  `HealthPackageVitalsReader` over a `VitalsReadClient` seam (+ injectable
+  `clock` for deterministic windowing): it reads each metric independently and
+  guards each, so one unsupported/failing type degrades to `null` instead of
+  blanking the snapshot — resting HR/HRV take the latest sample in a 7-day
+  window, sleep sums SLEEP_ASLEEP segment durations over the past day, steps sum
+  since local midnight. The seam returns normalized `HealthSample`s
+  (value/start/end off the package's `HealthDataPoint`/`NumericHealthValue`) so
+  the windowing/reduction is unit-testable without the platform method channel
+  (absent under `flutter test`); `LiveVitalsReadClient` wraps `Health()` and
+  configures lazily. `MockVitalsReader` stays the **provider default** (fixed
+  plausible snapshot → populated dashboard in tests + hardware-free dev);
+  `main.dart` overrides `vitalsReaderProvider` to the real reader, mirroring the
+  permission-service override. `health_data_types.dart` now exposes the metric
+  types individually (`restingHeartRateType`/`hrvType`/`sleepAsleepType`/
+  `stepsType`, HRV still platform-resolved SDNN vs RMSSD) with `vitalsHealthTypes()`
+  built from them, so the permission request and the reads reference the same
+  types. `features/vitals/vitals_controller.dart` adds `VitalsSnapshot` (raw
+  `reading` + derived `readiness`), the pure `computeReadiness(VitalsReading)`
+  (a rough 0–100 blend of recovery signals only — HRV 20→100ms, resting HR
+  80→40bpm, sleep 0→8h — averaging just the present sub-scores, `null` when none
+  available; steps are activity not recovery, so excluded by design), and
+  `VitalsController extends AsyncNotifier<VitalsSnapshot>`: `build()` watches
+  `vitalsPermissionControllerProvider.isGranted` and stays `VitalsSnapshot.empty`
+  firing NO read until granted (the gate, not a premature read, drives
+  connecting); on grant it reads + computes readiness. `refresh()` re-reads for
+  pull-to-refresh, a no-op while ungranted. All I/O stays in the
+  reader/controller per no-logic-in-widgets. 17 new tests: 6 reader
+  (`test/core/health/vitals_reader_test.dart`: latest-wins HR/HRV + sleep/steps
+  sums, missing→null, all-empty, per-metric failure isolated, zero-duration
+  sleep, mock populated) and 11 controller
+  (`test/features/vitals/vitals_controller_test.dart`: 5 `computeReadiness` —
+  blend, top-end, partial, clamp, null-when-no-recovery; 6 `VitalsController` —
+  empty-until-granted with no read, reads+readiness on grant, missing metrics
+  preserved, refresh re-reads, refresh no-op ungranted). `flutter analyze` clean,
+  `flutter test` 129/129 green. (On-device HealthKit/Health Connect reads can't
+  run in this headless env; the Dart analyze + test gate is what's verified.)
 - 2026-06-27 · M5 · Permission handling with graceful denied state. New vitals
   feature (`app/lib/features/vitals/`) gates the Home dashboard on health-data
   access, built on the real `healthPermissionServiceProvider` (the mock stays the
