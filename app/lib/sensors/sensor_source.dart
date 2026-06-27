@@ -109,6 +109,46 @@ enum FormSeverity {
   major,
 }
 
+/// The wake phrase the glasses' always-on mic listens for to open a hands-free
+/// Q&A turn. Fixed for now (Q&A itself lands in M9/AI); kept here as the single
+/// source of truth so the mock's simulated wake events and the native sides
+/// agree, and so it has one place to grow into per-user config later.
+const String kWakePhrase = 'hey buddy';
+
+/// A wake-word trigger from the glasses' always-on mic.
+///
+/// The second *input* path from the hardware, but a control signal rather than a
+/// tracking one: when the wearer says [kWakePhrase] the glasses push one of these
+/// so the app can open a hands-free Q&A turn (the Q&A round-trip itself lands in
+/// M9/AI). Independent of [WorkoutSensorSource.startTracking] — the mic listens
+/// whenever the source is connected, so a question can be asked between sets.
+class WakeEvent {
+  const WakeEvent({
+    required this.phrase,
+    required this.timestamp,
+    this.confidence,
+  });
+
+  /// The recognized wake phrase that fired the trigger (e.g. [kWakePhrase]).
+  final String phrase;
+
+  /// When the wake phrase was detected.
+  final DateTime timestamp;
+
+  /// Detection confidence in `0..1`, or null if the source doesn't score it.
+  final double? confidence;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WakeEvent &&
+      other.phrase == phrase &&
+      other.timestamp == timestamp &&
+      other.confidence == confidence;
+
+  @override
+  int get hashCode => Object.hash(phrase, timestamp, confidence);
+}
+
 /// A piece of form feedback for the exercise currently being tracked.
 class FormCue {
   const FormCue({required this.severity, required this.message});
@@ -147,6 +187,16 @@ abstract interface class WorkoutSensorSource {
   /// or exercises without [SensorCapabilities.formTracking]. Broadcast.
   Stream<FormCue> get formCues;
 
+  /// Wake-word triggers from the glasses' always-on mic — a control input that
+  /// opens a hands-free Q&A turn (the Q&A round-trip lands in M9/AI). Broadcast.
+  ///
+  /// Unlike [reps]/[formCues] this is independent of [startTracking]: the mic
+  /// listens whenever the source is connected, so the wearer can ask a question
+  /// between sets. Sources without a mic surface an empty/never-firing stream —
+  /// [MockSensorSource] exposes it so Q&A wiring runs with no hardware, and the
+  /// glasses source degrades to an empty stream when the DAT SDK is absent.
+  Stream<WakeEvent> get wakeEvents;
+
   /// Establishes the underlying sensor connection and reports whether it's
   /// usable. Safe to call more than once.
   Future<SensorAvailability> connect();
@@ -156,6 +206,18 @@ abstract interface class WorkoutSensorSource {
 
   /// Stops watching the current exercise (e.g. on rest or set completion).
   Future<void> stopTracking();
+
+  /// Speaks a short coaching cue through the glasses' speakers — the first
+  /// *output* path back to the hardware (everything else here is input). It
+  /// lives on this same seam, rather than a sibling interface, so the
+  /// session/coach layer reaches the speakers through the one resolved source
+  /// the rest of the hardware already goes through.
+  ///
+  /// Best-effort and must never throw on a delivery failure: a source with no
+  /// speakers ([MockSensorSource], the fallback whenever glasses are absent)
+  /// implements this as a silent no-op, so callers can fire cues
+  /// unconditionally and they degrade gracefully with no hardware attached.
+  Future<void> playCue(String message);
 
   /// Releases all resources and closes the event streams. The source must not
   /// be used afterwards.

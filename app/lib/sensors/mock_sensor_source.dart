@@ -34,6 +34,8 @@ class MockSensorSource implements WorkoutSensorSource {
   final StreamController<RepEvent> _reps = StreamController<RepEvent>.broadcast();
   final StreamController<FormCue> _formCues =
       StreamController<FormCue>.broadcast();
+  final StreamController<WakeEvent> _wakeEvents =
+      StreamController<WakeEvent>.broadcast();
 
   Timer? _timer;
   TrackedExercise? _tracking;
@@ -49,6 +51,9 @@ class MockSensorSource implements WorkoutSensorSource {
 
   @override
   Stream<FormCue> get formCues => _formCues.stream;
+
+  @override
+  Stream<WakeEvent> get wakeEvents => _wakeEvents.stream;
 
   @override
   Future<SensorAvailability> connect() async {
@@ -74,6 +79,14 @@ class MockSensorSource implements WorkoutSensorSource {
     _tracking = null;
   }
 
+  @override
+  Future<void> playCue(String message) async {
+    _ensureActive();
+    // The mock has no speakers, so a cue degrades to a silent no-op. The
+    // session/coach layer can fire cues unconditionally and they vanish
+    // harmlessly when no glasses are attached (the mock-first rule).
+  }
+
   /// Emits one rep for the exercise being tracked, advancing the set count.
   /// No-op when not tracking or after [dispose].
   void emitRep({double? confidence}) {
@@ -90,6 +103,17 @@ class MockSensorSource implements WorkoutSensorSource {
   void emitFormCue(FormCue cue) {
     if (_disposed || _tracking?.formTracked != true) return;
     _formCues.add(cue);
+  }
+
+  /// Emits a wake-word trigger, as if the wearer said the wake phrase. Unlike
+  /// [emitRep]/[emitFormCue] this is independent of tracking — the mic is
+  /// always-on — so it fires whenever the source is live; only [dispose] stops
+  /// it. Lets Q&A wiring be exercised end to end with no glasses attached.
+  void emitWake({String phrase = kWakePhrase, double? confidence}) {
+    if (_disposed) return;
+    _wakeEvents.add(
+      WakeEvent(phrase: phrase, timestamp: clock(), confidence: confidence),
+    );
   }
 
   void _tick() {
@@ -120,5 +144,6 @@ class MockSensorSource implements WorkoutSensorSource {
     _tracking = null;
     await _reps.close();
     await _formCues.close();
+    await _wakeEvents.close();
   }
 }
