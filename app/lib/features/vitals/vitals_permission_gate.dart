@@ -49,7 +49,7 @@ class VitalsPermissionGate extends ConsumerWidget {
           key: const Key('vitals-permission-denied'),
           icon: Icons.lock_outline,
           title: 'Health access is off',
-          body: "Your vitals stay empty until you grant read access. You can "
+          body: 'Your vitals stay empty until you grant read access. You can '
               'connect any time — the rest of GymBuddy works without it.',
           actionLabel: 'Try again',
           requesting: state.requesting,

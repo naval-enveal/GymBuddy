@@ -15,14 +15,38 @@
 
 ## Next up
 **M5 · Vitals dashboard is underway** on branch `m5-vitals` (cut from `dev`
-after PR #4 merged M4). The first task just shipped: the `health` package
-(v13) is integrated for HealthKit + Health Connect. The next unchecked task is
-**Permission handling with graceful denied state** — build the vitals feature's
-permission UI/state on top of the now-real `healthPermissionServiceProvider`,
-surfacing `granted` / `denied` / `unavailable` (the M5 reads must keep working
-— empty/locked states — when the user declines or no health store is present).
+after PR #4 merged M4). Permission handling now ships with graceful denied/
+unavailable states. The next unchecked task is **Reads resting HR, HRV, sleep,
+steps, readiness proxy** — add the data-read layer behind the `health` package
+(reuse `vitalsHealthTypes()` so the reads ask for exactly the metrics the
+permission flow requested), expose it through a vitals controller, and compute a
+readiness proxy. Gate the reads on `vitalsPermissionControllerProvider.isGranted`
+(the `VitalsPermissionGate` only reveals the dashboard once granted) and keep
+empty/missing-metric states working when a metric isn't recorded.
 
-Integration design notes (this task, done): the real service lives behind the
+Permission-flow design notes (this task, done): the vitals feature
+(`app/lib/features/vitals/`) gates the dashboard on health access on top of the
+real `healthPermissionServiceProvider`. `vitals_permission_controller.dart` adds
+`VitalsPermissionController` (`Notifier<VitalsPermissionState>`) — state starts
+`notRequested` (Home does NOT fire a platform dialog on load; the user opts in),
+`request()` calls the service, records `granted`/`denied`/`unavailable`, sets a
+transient `requesting` flag, no-ops on a double-tap, and defensively falls back
+to `unavailable` if the service ever throws (its contract degrades, but the UI
+must never stick on a spinner). `vitals_permission_gate.dart` (`VitalsPermissionGate`,
+`ConsumerWidget`) reveals its `child` only when `granted`; otherwise it renders a
+shared `_VitalsLocked` layout per non-granted outcome (un-asked → connect prompt,
+declined → retry, no store → check-again), each with a connect/retry action.
+Declining never blocks the app — vitals just stay locked, the same empty-state
+posture as the sensor/network layers. `home_screen.dart` (now a plain
+`HomeScreen`) wraps a granted-state placeholder in the gate; the live StatRings +
+sparklines land in the next task. All permission I/O lives in the controller,
+never the widgets. 13 tests (`test/features/vitals/`: 6 controller — initial
+state, granted/denied/unavailable outcomes, in-flight flag, single-flight; 7 gate
+— each locked layout, granted reveals the dashboard, tap-to-connect grant/deny).
+Note: the gate-test helper builds its override list inline because Riverpod's
+`Override` type isn't part of its public API and can't be named in a signature.
+
+Integration design notes (prior task, done): the real service lives behind the
 existing `HealthPermissionService` interface in `app/lib/core/health/`. New
 `health_data_types.dart` exposes `vitalsHealthTypes()` — the platform-aware set
 of `HealthDataType`s the dashboard reads (resting HR, HRV, sleep, steps); HRV
@@ -193,7 +217,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M5 — Vitals dashboard  `[ ]`
 - [x] `health` package integrated (HealthKit + Health Connect)
-- [ ] Permission handling with graceful denied state
+- [x] Permission handling with graceful denied state
 - [ ] Reads resting HR, HRV, sleep, steps, readiness proxy
 - [ ] Home renders StatRings + sparklines, with empty states
 
@@ -239,6 +263,33 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M5 · Permission handling with graceful denied state. New vitals
+  feature (`app/lib/features/vitals/`) gates the Home dashboard on health-data
+  access, built on the real `healthPermissionServiceProvider` (the mock stays the
+  test/dev default). `vitals_permission_controller.dart` —
+  `VitalsPermissionController extends Notifier<VitalsPermissionState>`: state
+  starts `notRequested` (Home doesn't fire a platform dialog on load — the user
+  opts in), `request()` calls the service and records
+  `granted`/`denied`/`unavailable`, sets a transient `requesting` flag for the
+  spinner, no-ops a double-tap so two prompts can't fire, and defensively falls
+  back to `unavailable` if the service ever throws (its contract degrades platform
+  errors, but the UI must never stick in a spinner). `vitals_permission_gate.dart`
+  — `VitalsPermissionGate` (`ConsumerWidget`) reveals its `child` only when
+  access is `granted`; every other outcome renders a shared `_VitalsLocked`
+  layout (un-asked → "Connect health data" prompt, declined → "Try again", no
+  store → "Check again"), each offering a connect/retry action. Declining never
+  blocks the app — vitals just stay locked, the same empty-state posture the
+  sensor/network layers take when a dependency is absent. `home_screen.dart` is
+  now a plain `HomeScreen` wrapping a granted-state placeholder in the gate (the
+  live StatRings + sparklines land in the next M5 task). All permission I/O lives
+  in the controller per no-logic-in-widgets; the widgets only render state and
+  forward the connect tap. 13 new tests (`test/features/vitals/`): 6 controller
+  (initial state, granted/denied/unavailable outcomes, in-flight `requesting`
+  flag, single-flight) and 7 gate (each locked layout, granted reveals the
+  dashboard, tap-to-connect on grant/deny). The gate-test helper builds its
+  override list inline — Riverpod 3.x's `Override` type isn't part of its public
+  API, so it can't be named in a helper signature. `flutter analyze` clean,
+  `flutter test` 113/113 green.
 - 2026-06-26 · M5 · `health` package integrated (HealthKit + Health Connect),
   starting M5 on branch `m5-vitals`. Added `health: ^13.0.0` (resolves to
   13.3.1). The real platform integration lives behind the existing

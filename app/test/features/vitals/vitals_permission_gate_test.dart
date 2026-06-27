@@ -28,13 +28,25 @@ class _SeededController extends VitalsPermissionController {
 
 const _child = Text('LIVE DASHBOARD', key: Key('vitals-dashboard'));
 
+/// Pumps the gate, seeding either a fixed controller state ([seed]) or a fake
+/// service the connect action drives through ([service]). The overrides list is
+/// built inline — Riverpod's `Override` type isn't part of its public API, so it
+/// can't be named in a helper signature.
 Future<void> _pumpGate(
   WidgetTester tester, {
-  required List<Override> overrides,
+  VitalsPermissionState? seed,
+  HealthPermissionService? service,
 }) {
   return tester.pumpWidget(
     ProviderScope(
-      overrides: overrides,
+      overrides: [
+        if (seed != null)
+          vitalsPermissionControllerProvider.overrideWith(
+            () => _SeededController(seed),
+          ),
+        if (service != null)
+          healthPermissionServiceProvider.overrideWithValue(service),
+      ],
       child: const MaterialApp(
         home: Scaffold(body: VitalsPermissionGate(child: _child)),
       ),
@@ -42,18 +54,13 @@ Future<void> _pumpGate(
   );
 }
 
-Override _seed(VitalsPermissionState state) =>
-    vitalsPermissionControllerProvider.overrideWith(
-      () => _SeededController(state),
-    );
-
 void main() {
   group('VitalsPermissionGate', () {
     testWidgets('shows the connect prompt when not yet requested',
         (tester) async {
       await _pumpGate(
         tester,
-        overrides: [_seed(const VitalsPermissionState())],
+        seed: const VitalsPermissionState(),
       );
 
       expect(find.byKey(const Key('vitals-permission-prompt')), findsOneWidget);
@@ -64,11 +71,9 @@ void main() {
     testWidgets('shows the denied state with a retry', (tester) async {
       await _pumpGate(
         tester,
-        overrides: [
-          _seed(const VitalsPermissionState(
-            status: HealthPermissionStatus.denied,
-          )),
-        ],
+        seed: const VitalsPermissionState(
+          status: HealthPermissionStatus.denied,
+        ),
       );
 
       expect(find.byKey(const Key('vitals-permission-denied')), findsOneWidget);
@@ -78,11 +83,9 @@ void main() {
     testWidgets('shows the unavailable state', (tester) async {
       await _pumpGate(
         tester,
-        overrides: [
-          _seed(const VitalsPermissionState(
-            status: HealthPermissionStatus.unavailable,
-          )),
-        ],
+        seed: const VitalsPermissionState(
+          status: HealthPermissionStatus.unavailable,
+        ),
       );
 
       expect(
@@ -95,11 +98,9 @@ void main() {
     testWidgets('reveals the dashboard once granted', (tester) async {
       await _pumpGate(
         tester,
-        overrides: [
-          _seed(const VitalsPermissionState(
-            status: HealthPermissionStatus.granted,
-          )),
-        ],
+        seed: const VitalsPermissionState(
+          status: HealthPermissionStatus.granted,
+        ),
       );
 
       expect(find.byKey(const Key('vitals-dashboard')), findsOneWidget);
@@ -110,11 +111,7 @@ void main() {
         (tester) async {
       await _pumpGate(
         tester,
-        overrides: [
-          healthPermissionServiceProvider.overrideWithValue(
-            _FakeHealthPermissionService(HealthPermissionStatus.granted),
-          ),
-        ],
+        service: _FakeHealthPermissionService(HealthPermissionStatus.granted),
       );
 
       // Starts on the prompt.
@@ -130,11 +127,7 @@ void main() {
         (tester) async {
       await _pumpGate(
         tester,
-        overrides: [
-          healthPermissionServiceProvider.overrideWithValue(
-            _FakeHealthPermissionService(HealthPermissionStatus.denied),
-          ),
-        ],
+        service: _FakeHealthPermissionService(HealthPermissionStatus.denied),
       );
 
       await tester.tap(find.byKey(const Key('vitals-permission-action')));
