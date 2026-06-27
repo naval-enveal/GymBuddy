@@ -1,14 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:gymbuddy/core/pose/exercise_angle_configs.dart';
 import 'package:gymbuddy/core/pose/pose_detector.dart';
+import 'package:gymbuddy/core/pose/pose_rep_counter.dart';
 import 'package:gymbuddy/core/pose/tflite_pose_detector.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 
 /// Control channel — `connect`/`startTracking`/`stopTracking`/`dispose`.
 const String kGlassesMethodChannel = 'gymbuddy/glasses';
 
-/// Streaming rep events: `{index, timestampMs, confidence?}`.
+/// Streaming raw rep events from the DAT SDK: `{index, timestampMs, confidence?}`.
+/// Present for completeness; in practice the SDK doesn't emit rep events so the
+/// [MetaGlassesSensorSource] counts reps on-device from pose (M8). Native events
+/// are still merged in case a future SDK version adds them.
 const String kGlassesRepsChannel = 'gymbuddy/glasses/reps';
 
 /// Streaming form cues: `{severity, message}`.
@@ -30,13 +35,19 @@ const String kGlassesCameraChannel = 'gymbuddy/glasses/camera';
 /// Meta DAT SDK.
 ///
 /// It owns no rep/form logic of its own — it forwards lifecycle calls to the
-/// native [MethodChannel] and decodes the two native [EventChannel]s onto the
+/// native [MethodChannel] and decodes the native [EventChannel]s onto the
 /// `sensor_source.dart` value types. The native sides detect the DAT SDK
 /// reflectively and report [SensorAvailability.unavailable] (emitting no events)
 /// whenever it's absent — every build until the SDK framework is vendored — so
 /// this source surfaces `unavailable` faithfully and the capability-detection
 /// layer (M7 task 4) can fall back to [MockSensorSource]. Until then no feature
 /// code talks to this class directly; it all goes through [WorkoutSensorSource].
+///
+/// Reps are counted **on-device from pose** (M8): the DAT SDK streams only the
+/// POV camera/audio/mic, so the source runs each estimated [PoseFrame] through a
+/// [PoseRepCounter] and surfaces its output as [reps], rather than waiting for a
+/// native rep event the SDK never produces. Native DAT-SDK rep events (if the SDK
+/// ever adds them) are merged into the same stream via [kGlassesRepsChannel].
 class MetaGlassesSensorSource implements WorkoutSensorSource {
   MetaGlassesSensorSource({
     MethodChannel? methodChannel,
@@ -46,7 +57,8 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     EventChannel? cameraChannel,
     PoseDetector? poseDetector,
   })  : _methods = methodChannel ?? const MethodChannel(kGlassesMethodChannel),
-        _repsChannel = repsChannel ?? const EventChannel(kGlassesRepsChannel),
+        _repsEventChannel =
+            repsChannel ?? const EventChannel(kGlassesRepsChannel),
         _formCuesChannel =
             formCuesChannel ?? const EventChannel(kGlassesFormCuesChannel),
         _wakeChannel = wakeChannel ?? const EventChannel(kGlassesWakeChannel),
@@ -55,25 +67,40 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     // The real camera path: on-device MoveNet fed by the glasses' POV camera
     // frames. Injectable so tests run with a MockPoseDetector and no FFI.
     _poseDetector = poseDetector ?? TflitePoseDetector(frameSource: cameraFrames);
+
+    // Lazily subscribe to the native rep channel when the first caller listens
+    // to [reps]; cancel when the last one unsubscribes. Pose-derived reps are
+    // pushed into the same controller from [startTracking].
+    _repsController = StreamController<RepEvent>.broadcast(
+      onListen: _startNativeRepsSub,
+      onCancel: _stopNativeRepsSub,
+    );
   }
 
   final MethodChannel _methods;
-  final EventChannel _repsChannel;
+  final EventChannel _repsEventChannel;
   final EventChannel _formCuesChannel;
   final EventChannel _wakeChannel;
   final EventChannel _cameraChannel;
   late final PoseDetector _poseDetector;
+  late final StreamController<RepEvent> _repsController;
 
   /// Populated by [connect] from the native handshake; conservatively empty
   /// until then so capability-gated UI never shows before we've connected.
   SensorCapabilities _capabilities =
       const SensorCapabilities(repCounting: false, formTracking: false);
 
-  Stream<RepEvent>? _reps;
   Stream<FormCue>? _formCues;
   Stream<WakeEvent>? _wake;
   Stream<PoseInput>? _cameraFrames;
   bool _disposed = false;
+
+  // Native rep channel subscription — active only while [reps] has listeners.
+  StreamSubscription<dynamic>? _nativeRepsSub;
+
+  // Pose-based rep counting — per-set state, wired in [startTracking].
+  StreamSubscription<PoseFrame>? _poseFramesSub;
+  PoseRepCounter? _repCounter;
 
   @override
   SensorCapabilities get capabilities => _capabilities;
@@ -90,8 +117,7 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
       _cameraChannel.receiveBroadcastStream().map(_decodeFrame);
 
   @override
-  Stream<RepEvent> get reps =>
-      _reps ??= _repsChannel.receiveBroadcastStream().map(_decodeRep);
+  Stream<RepEvent> get reps => _repsController.stream;
 
   @override
   Stream<FormCue> get formCues =>
@@ -138,15 +164,37 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   @override
   Future<void> startTracking(TrackedExercise exercise) async {
     _ensureActive();
+    // Cancel any ongoing pose frame subscription from the previous set.
+    await _poseFramesSub?.cancel();
+    _poseFramesSub = null;
+    _repCounter = null;
+
     await _methods.invokeMethod<void>('startTracking', <String, Object?>{
       'name': exercise.name,
       'formTracked': exercise.formTracked,
     });
+
+    // Wire pose-based rep counting if we have an angle config for this exercise
+    // and the model is loaded. Silently skipped when pose isn't ready yet.
+    final config = resolveAngleConfig(exercise.name);
+    if (config != null && _poseDetector.isReady) {
+      final counter = PoseRepCounter(config);
+      _repCounter = counter;
+      _poseFramesSub = _poseDetector.frames.listen((frame) {
+        final ts = frame.timestamp ?? DateTime.now();
+        final event = counter.processFrame(frame, ts);
+        if (event != null) _repsController.add(event);
+      });
+    }
   }
 
   @override
   Future<void> stopTracking() async {
     _ensureActive();
+    await _poseFramesSub?.cancel();
+    _poseFramesSub = null;
+    _repCounter?.reset();
+    _repCounter = null;
     await _methods.invokeMethod<void>('stopTracking');
   }
 
@@ -170,6 +218,10 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    await _poseFramesSub?.cancel();
+    _poseFramesSub = null;
+    _stopNativeRepsSub();
+    await _repsController.close();
     await _poseDetector.dispose();
     try {
       await _methods.invokeMethod<void>('dispose');
@@ -180,12 +232,25 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     }
   }
 
-  RepEvent _decodeRep(dynamic event) {
+  void _startNativeRepsSub() {
+    _nativeRepsSub = _repsEventChannel
+        .receiveBroadcastStream()
+        .map(_decodeRepEvent)
+        .listen(_repsController.add);
+  }
+
+  void _stopNativeRepsSub() {
+    _nativeRepsSub?.cancel();
+    _nativeRepsSub = null;
+  }
+
+  RepEvent _decodeRepEvent(dynamic event) {
     final map = (event as Map).cast<Object?, Object?>();
     return RepEvent(
       index: (map['index'] as num).toInt(),
-      timestamp:
-          DateTime.fromMillisecondsSinceEpoch((map['timestampMs'] as num).toInt()),
+      timestamp: DateTime.fromMillisecondsSinceEpoch(
+        (map['timestampMs'] as num).toInt(),
+      ),
       confidence: (map['confidence'] as num?)?.toDouble(),
     );
   }

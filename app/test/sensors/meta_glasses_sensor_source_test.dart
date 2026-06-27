@@ -1,10 +1,28 @@
-import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymbuddy/core/pose/pose_detector.dart';
 import 'package:gymbuddy/sensors/meta_glasses_sensor_source.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
+
+/// Builds a PoseFrame with a leftHip–leftKnee–leftAnkle angle of [angleDeg].
+/// Used to drive the PoseRepCounter with squat-shaped frames in pose-path tests.
+PoseFrame _squatFrame(double angleDeg) {
+  final rad = angleDeg * math.pi / 180;
+  return PoseFrame(
+    keypoints: [
+      const Keypoint(id: KeypointId.leftHip, x: 0, y: 1, confidence: 0.9),
+      const Keypoint(id: KeypointId.leftKnee, x: 0, y: 0, confidence: 0.9),
+      Keypoint(
+        id: KeypointId.leftAnkle,
+        x: math.sin(rad),
+        y: math.cos(rad),
+        confidence: 0.9,
+      ),
+    ],
+  );
+}
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -442,6 +460,86 @@ void main() {
         () => pose.emitFrame(const PoseFrame(keypoints: [])),
         throwsStateError,
       );
+    });
+  });
+
+  group('pose-based rep counting', () {
+    test('startTracking wires PoseRepCounter when pose is ready and config exists',
+        () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: false),
+      );
+
+      // Emit a down frame (angle ~80° < 90° low threshold).
+      pose.emitFrame(_squatFrame(80));
+      // Emit an up frame (angle ~160° > 150° high threshold) — that's one rep.
+      pose.emitFrame(_squatFrame(160));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, hasLength(1));
+      expect(reps.first.index, 1);
+    });
+
+    test('pose reps stop flowing after stopTracking', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat'),
+      );
+      await source.stopTracking();
+
+      pose.emitFrame(_squatFrame(80));
+      pose.emitFrame(_squatFrame(160));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, isEmpty);
+    });
+
+    test('startTracking skips pose wiring for unknown exercises', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'handstand'),
+      );
+
+      pose.emitFrame(_squatFrame(80));
+      pose.emitFrame(_squatFrame(160));
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, isEmpty);
+    });
+
+    test('startTracking skips pose wiring when pose is not ready', () async {
+      final pose = MockPoseDetector(); // not initialised
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat'),
+      );
+
+      pose.emitFrame(_squatFrame(80));
+      pose.emitFrame(_squatFrame(160));
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, isEmpty);
     });
   });
 }

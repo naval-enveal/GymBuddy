@@ -21,25 +21,19 @@ void main() {
       expect(detector.isReady, isFalse);
     });
 
-    test('frames never fires when the model failed to load', () async {
-      final frames = StreamController<PoseInput>();
+    test('does not consume camera frames when the model failed to load',
+        () async {
+      final frames = StreamController<PoseInput>.broadcast();
       addTearDown(frames.close);
-      final detector =
-          TflitePoseDetector(frameSource: frames.stream, loadInterpreter: failingLoader);
-      addTearDown(detector.dispose);
-
-      final received = <PoseFrame>[];
-      final sub = detector.frames.listen(received.add);
-      addTearDown(sub.cancel);
-
-      await detector.init();
-      frames.add(
-        PoseInput(rgb: Uint8List(3), width: 1, height: 1),
+      final detector = TflitePoseDetector(
+        frameSource: frames.stream,
+        loadInterpreter: failingLoader,
       );
-      await Future<void>.delayed(Duration.zero);
 
-      // No model means no subscription to the camera frames, so nothing decodes.
-      expect(received, isEmpty);
+      expect(await detector.init(), isFalse);
+      // A failed model must not subscribe to the camera stream, so no frame is
+      // ever run through (a missing inference path, not a crashing one).
+      expect(frames.hasListener, isFalse);
     });
 
     test('init after dispose throws', () async {

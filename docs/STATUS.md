@@ -15,15 +15,11 @@
 
 ## Next up
 **M8 is in progress** on branch `m8-pose` (cut from `dev`). Gate cleared by human
-decision: build mock-first, test on device later. Task 1 (tflite_flutter + pose
-abstraction) is done. **Next: task 2 — "Rep detection fed by active sensor
-source"**: wire pose frames into rep counting. `TflitePoseDetector` already
-subscribes to a `frameSource` stream; the job is to add a `PoseRepCounter`
-that tracks joint angles over consecutive frames and emits a `RepEvent` when a
-full up/down cycle completes, then feed it from `MetaGlassesSensorSource` so
-the real glasses path counts reps via pose instead of waiting for a native
-DAT-SDK rep event. `MockSensorSource` continues to emit reps directly
-(no model needed).
+decision: build mock-first, test on device later. Tasks 1–2 done.
+**Next: task 3 — "Basic joint-angle checks"**: add form-feedback logic that uses
+the same keypoint angles from `PoseRepCounter` to detect common form faults
+(e.g. knee caving on squat, back rounding on deadlift) and emit `FormCue`s
+through `MetaGlassesSensorSource.formCues`.
 
 Wake-trigger design notes (task 6, done): the second *input* path from the
 glasses — a control signal, not a tracking one. The mic listens for a fixed wake
@@ -659,7 +655,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
 - [x] Pose model integrated (tflite_flutter)
-- [ ] Rep detection fed by active sensor source
+- [x] Rep detection fed by active sensor source
 - [ ] Basic joint-angle checks
 - [ ] Initial mirror/POV-friendly exercise set
 - [ ] UI marks exercises form-tracked vs rep-tracked-only
@@ -683,6 +679,31 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M8 · Rep detection fed by active sensor source (M8 task 2).
+  New `app/lib/core/pose/pose_rep_counter.dart` — `RepAngleConfig` (pivot/from/to
+  keypoints + low/high angle thresholds + minConfidence) and `PoseRepCounter`
+  (pure-Dart joint-angle state machine: top→below-low → bottom → above-high → top
+  = one rep, emits `RepEvent`; `reset()` clears count + phase per set).
+  New `app/lib/core/pose/exercise_angle_configs.dart` — `kExerciseAngleConfigs`
+  (8 POV/mirror-visible exercises: squat, deadlift, bicep curl, push-up, lunge,
+  shoulder press, romanian deadlift, overhead press) and `resolveAngleConfig(name)`
+  (case-insensitive lookup, null for unknown exercises).
+  `MetaGlassesSensorSource` rewritten: added `kGlassesRepsChannel` constant for
+  the native DAT-SDK rep channel; `reps` is now a lazy
+  `StreamController<RepEvent>.broadcast` that subscribes to the native channel on
+  first listen and cancels on last unsubscribe (native events merged in case a
+  future SDK version adds them); `startTracking` resolves the angle config for the
+  exercise and, when pose is ready, wires a `PoseRepCounter` that pushes `RepEvent`s
+  into the same broadcast controller — silently skipped when pose isn't loaded or
+  the exercise has no config; `stopTracking` cancels the per-set pose subscription
+  and resets the counter; `dispose` closes the controller and tears down the pose
+  detector. 30 new tests: 14 `pose_rep_counter_test.dart` (`RepAngleConfig` assert
+  + minConfidence default, `PoseRepCounter` zero-start / top-stays / one-rep cycle /
+  no-rep-without-bottom / two-reps / reset / low-confidence / absent-keypoint;
+  `resolveAngleConfig` case-insensitive / unknown→null / full-coverage / all-expected),
+  4 new `meta_glasses_sensor_source_test.dart` (wires PoseRepCounter on known+ready,
+  stops after stopTracking, skips for unknown exercise, skips when pose not ready).
+  `flutter analyze` clean, `flutter test` 268/268 green.
 - 2026-06-27 · M8 · Pose model integrated (tflite_flutter). New `app/lib/core/pose/`:
   `pose_landmarks.dart` — `KeypointId` enum (17 COCO keypoints), `Keypoint` value
   type (x/y/confidence in 0..1), `PoseFrame` (list of keypoints + timestamp,
