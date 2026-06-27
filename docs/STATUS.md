@@ -16,20 +16,44 @@
 ## Next up
 **M6 · Workout session engine + logging** is underway on branch `m6-session`
 (cut from `dev` after M5 merged via PR #5). The sensor abstraction, the session
-state machine, and the focus-mode UI are done; the next task is **Manual
-rep/weight logging fallback**. Build it on the seam the controller already
-exposes — `completeSet()` is the manual entry point, and a set with a null
-`targetReps` never auto-advances, so it's already ended by hand. What's missing
-is letting the user *correct the count* (and capture weight) before a set is
-recorded: today `completeSet()` snapshots whatever `state.reps` the sensor
-counted. Add a controller affordance to set/adjust the current set's reps (and a
-weight field — `CompletedSet` currently holds only `{exerciseName, setNumber,
-reps}`, so extend it with a nullable `weight` and thread it through the mapper
-defaults + the WorkoutLog sync). Surface it in the exercising view of
-`workout_screen.dart` (a stepper or quick-entry on the rep counter + a weight
-input), keeping all mutation in the controller per no-logic-in-widgets. This is
-the no-glasses path: a lifter with no sensor (or a rep the mock miscounted) can
-still log the set manually. After this: post-workout summary syncs to WorkoutLog.
+state machine, the focus-mode UI, and the manual rep/weight logging fallback are
+done; the last M6 task is **Post-workout summary syncs to WorkoutLog**. The
+`_CompletedView` in `workout_screen.dart` already renders the finished session
+(`state.completedSets` — each a `CompletedSet{exerciseName, setNumber, reps,
+weight?}`) and its "Done" button calls `controller.stop()` → idle. What's
+missing is persisting that summary to the backend before/at stop: add a server
+`WorkoutLog` write endpoint (the `WorkoutLog` Mongoose model already exists from
+M1; check its shape) behind `requireAuth`, a client `WorkoutLogApi` over
+`apiClientProvider` (mirror `plan_api.dart`/`profile_api.dart`), and have the
+session controller POST the completed sets when the workout finishes (map
+`CompletedSet`s to the log's set shape — `weight` is nullable, so omit/null it
+for bodyweight sets). Keep all I/O in the controller/API per
+no-logic-in-widgets; surface a sync error without blocking the return to idle
+(same graceful posture as the rest of the app). That closes out M6 — then open
+the PR into `dev`.
+
+Manual logging design notes (this task, done): the no-glasses logging path.
+`CompletedSet` gained a nullable `double? weight` (null = unlogged/bodyweight,
+part of value identity) and `WorkoutSessionState` a transient `double? weight`
+for the *current* set (reset to null at the start of every set via a `copyWith`
+`clearWeight` flag, mirroring `clearFormCue`). The controller
+(`workout_session_controller.dart`) added two synchronous, exercising-only
+affordances: `setReps(int)` — overrides the counted reps (clamped ≥ 0; unlike a
+sensor rep it never trips auto-advance, so a lifter can correct a miscount or log
+reps by hand) — and `setWeight(double?)` (null/negative clears). `completeSet()`
+now snapshots both `state.reps` *and* `state.weight` into the `CompletedSet`.
+Surfaced in `_ExercisingView`: a `_RepStepper` flanks the `RepCounter` with
+`rep-decrement`/`rep-increment` `IconButton`s (decrement disabled at 0) that
+dispatch `setReps(reps ± 1)`, and a `_WeightInput` (`Key('weight-input')`,
+stateful only for its `TextEditingController`, keyed by exercise+set so a new set
+clears it) forwards parsed input via `setWeight`. `_CompletedSetTile` shows
+"{weight} kg × {reps} reps" when a weight was logged. The mapper needs no change
+— `PlanExercise` carries no weight, so the session default is simply null. 11 new
+tests (6 controller: setReps override/clamp/no-op, setWeight record/clear/no-op,
+completeSet snapshot, per-set reset; 1 model: `CompletedSet` weight equality; 4
+widget: rep stepper forwards ±, decrement disabled at 0, weight input forwards
+double/null, completed tile shows the load). `flutter analyze` clean, `flutter
+test` 192/192 green.
 
 Focus-mode UI design notes (this task, done): `features/workout/workout_screen.dart`
 is now a `ConsumerWidget` over `workoutSessionControllerProvider` — pure
@@ -412,7 +436,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] `WorkoutSensorSource` interface + `MockSensorSource` defined
 - [x] Session state machine (exercise → set → rest → next)
 - [x] Focus-mode UI (RepCounter, RestTimer)
-- [ ] Manual rep/weight logging fallback
+- [x] Manual rep/weight logging fallback
 - [ ] Post-workout summary syncs to WorkoutLog
 
 ### M7 — Glasses integration layer  [HARDWARE-REQUIRED]  `[ ]`
@@ -450,6 +474,26 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M6 · Manual rep/weight logging fallback — the no-glasses logging
+  path so a lifter with no sensor (or a rep the mock miscounted) can still log a
+  set. `CompletedSet` gained a nullable `double? weight` (null = unlogged /
+  bodyweight, now part of value identity) and `WorkoutSessionState` a transient
+  `double? weight` for the current set, reset to null at the start of every set
+  via a new `copyWith` `clearWeight` flag (mirroring `clearFormCue`). The session
+  controller added two synchronous, exercising-only affordances: `setReps(int)`
+  overrides the counted reps (clamped ≥ 0; unlike a sensor rep it never trips
+  auto-advance, so the lifter can correct a miscount or log reps by hand) and
+  `setWeight(double?)` records the load (null/negative clears it). `completeSet()`
+  now snapshots both `state.reps` and `state.weight` into the `CompletedSet`.
+  Surfaced in `_ExercisingView` (no logic in the widget): a `_RepStepper` flanks
+  the `RepCounter` with `rep-decrement`/`rep-increment` buttons (decrement
+  disabled at 0) that dispatch `setReps(reps ± 1)`, and a `_WeightInput` (stateful
+  only for its `TextEditingController`, keyed by exercise+set so a new set clears
+  it) forwards parsed input via `setWeight`; `_CompletedSetTile` shows
+  "{weight} kg × {reps} reps" when a weight was logged. The session mapper needs
+  no change — `PlanExercise` carries no weight, so the default is null. 11 new
+  tests (6 controller, 1 model, 4 widget). `flutter analyze` clean, `flutter test`
+  192/192 green.
 - 2026-06-27 · M6 · Focus-mode UI (RepCounter, RestTimer). The Workout tab
   (`features/workout/workout_screen.dart`) replaces its `ComingSoon` placeholder
   with a `ConsumerWidget` over `workoutSessionControllerProvider` — pure

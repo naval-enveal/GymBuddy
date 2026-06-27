@@ -290,6 +290,99 @@ void main() {
     });
   });
 
+  group('manual rep/weight logging', () {
+    SessionPlan twoSetPlan() => planOf(exercises: const [
+          SessionExercise(
+            exercise: TrackedExercise(name: 'Deadlift'),
+            sets: 2,
+            restSeconds: 30,
+          ),
+        ]);
+
+    test('setReps overrides the counted reps without auto-advancing', () async {
+      final (container, mock) = makeSession();
+      await controllerOf(container).start(twoSetPlan());
+
+      mock.emitRep();
+      mock.emitRep();
+      await pumpEventQueue();
+      expect(stateOf(container).reps, 2);
+
+      // The lifter corrects the miscount up to 8.
+      controllerOf(container).setReps(8);
+      expect(stateOf(container).reps, 8);
+      // Manual entry never trips auto-advance, even past a (here-absent) target.
+      expect(stateOf(container).isExercising, isTrue);
+    });
+
+    test('setReps clamps to zero and is a no-op when not exercising', () async {
+      final (container, _) = makeSession();
+      // Not started yet → idle → no-op.
+      controllerOf(container).setReps(5);
+      expect(stateOf(container).reps, 0);
+
+      await controllerOf(container).start(twoSetPlan());
+      controllerOf(container).setReps(-3);
+      expect(stateOf(container).reps, 0);
+    });
+
+    test('setWeight records and clears the current set weight', () async {
+      final (container, _) = makeSession();
+      await controllerOf(container).start(twoSetPlan());
+
+      controllerOf(container).setWeight(60.5);
+      expect(stateOf(container).weight, 60.5);
+
+      // Null (or a negative) clears it back to unlogged.
+      controllerOf(container).setWeight(null);
+      expect(stateOf(container).weight, isNull);
+      controllerOf(container).setWeight(-10);
+      expect(stateOf(container).weight, isNull);
+    });
+
+    test('setWeight is a no-op when not exercising', () async {
+      final (container, _) = makeSession();
+      controllerOf(container).setWeight(40);
+      expect(stateOf(container).weight, isNull);
+    });
+
+    test('completeSet snapshots the manual reps and weight into the set',
+        () async {
+      final (container, _) = makeSession();
+      await controllerOf(container).start(twoSetPlan());
+
+      controllerOf(container).setReps(10);
+      controllerOf(container).setWeight(80);
+      await controllerOf(container).completeSet();
+
+      expect(
+        stateOf(container).completedSets.single,
+        const CompletedSet(
+          exerciseName: 'Deadlift',
+          setNumber: 1,
+          reps: 10,
+          weight: 80,
+        ),
+      );
+    });
+
+    test('weight resets to null for the next set', () async {
+      final (container, _) = makeSession();
+      await controllerOf(container).start(twoSetPlan());
+
+      controllerOf(container).setWeight(80);
+      await controllerOf(container).completeSet();
+      expect(stateOf(container).isResting, isTrue);
+      // The recorded set keeps its weight…
+      expect(stateOf(container).completedSets.single.weight, 80);
+
+      await controllerOf(container).skipRest();
+      // …but the new set starts unlogged.
+      expect(stateOf(container).setNumber, 2);
+      expect(stateOf(container).weight, isNull);
+    });
+  });
+
   group('stop', () {
     test('returns the session to idle', () async {
       final (container, mock) = makeSession();

@@ -74,6 +74,7 @@ class CompletedSet {
     required this.exerciseName,
     required this.setNumber,
     required this.reps,
+    this.weight,
   });
 
   final String exerciseName;
@@ -81,18 +82,24 @@ class CompletedSet {
   /// 1-based set position within its exercise.
   final int setNumber;
 
-  /// Reps actually counted for the set.
+  /// Reps actually counted for the set (possibly corrected by the lifter via
+  /// the manual-logging fallback).
   final int reps;
+
+  /// Weight logged for the set, or null when unrecorded (bodyweight, or the
+  /// lifter didn't enter one). Captured manually — no sensor measures load.
+  final double? weight;
 
   @override
   bool operator ==(Object other) =>
       other is CompletedSet &&
       other.exerciseName == exerciseName &&
       other.setNumber == setNumber &&
-      other.reps == reps;
+      other.reps == reps &&
+      other.weight == weight;
 
   @override
-  int get hashCode => Object.hash(exerciseName, setNumber, reps);
+  int get hashCode => Object.hash(exerciseName, setNumber, reps, weight);
 }
 
 /// Where the session currently is in the exercise → set → rest → next cycle.
@@ -122,6 +129,7 @@ class WorkoutSessionState {
     required this.reps,
     required this.restRemaining,
     required this.completedSets,
+    this.weight,
     this.formCue,
   });
 
@@ -147,6 +155,11 @@ class WorkoutSessionState {
 
   /// Reps counted so far in the current set.
   final int reps;
+
+  /// Weight the lifter has entered for the current set, or null when none is
+  /// logged yet. Reset at the start of every set; snapshotted into the
+  /// [CompletedSet] when the set is completed.
+  final double? weight;
 
   /// Seconds left in the current rest countdown (0 unless [status] is
   /// [SessionStatus.resting]).
@@ -186,6 +199,8 @@ class WorkoutSessionState {
     int? reps,
     int? restRemaining,
     List<CompletedSet>? completedSets,
+    double? weight,
+    bool clearWeight = false,
     FormCue? formCue,
     bool clearFormCue = false,
   }) {
@@ -197,6 +212,7 @@ class WorkoutSessionState {
       reps: reps ?? this.reps,
       restRemaining: restRemaining ?? this.restRemaining,
       completedSets: completedSets ?? this.completedSets,
+      weight: clearWeight ? null : (weight ?? this.weight),
       formCue: clearFormCue ? null : (formCue ?? this.formCue),
     );
   }
@@ -211,6 +227,7 @@ class WorkoutSessionState {
       other.reps == reps &&
       other.restRemaining == restRemaining &&
       listEquals(other.completedSets, completedSets) &&
+      other.weight == weight &&
       other.formCue == formCue;
 
   @override
@@ -222,6 +239,7 @@ class WorkoutSessionState {
         reps,
         restRemaining,
         Object.hashAll(completedSets),
+        weight,
         formCue,
       );
 }

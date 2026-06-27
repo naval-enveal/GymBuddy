@@ -51,6 +51,22 @@ void main() {
         const CompletedSet(exerciseName: 'Bench', setNumber: 1, reps: 10),
         isNot(const CompletedSet(exerciseName: 'Bench', setNumber: 1, reps: 9)),
       );
+      // Weight is part of identity; it defaults to null (unlogged).
+      expect(
+        const CompletedSet(exerciseName: 'Bench', setNumber: 1, reps: 10).weight,
+        isNull,
+      );
+      expect(
+        const CompletedSet(
+            exerciseName: 'Bench', setNumber: 1, reps: 10, weight: 60),
+        const CompletedSet(
+            exerciseName: 'Bench', setNumber: 1, reps: 10, weight: 60),
+      );
+      expect(
+        const CompletedSet(
+            exerciseName: 'Bench', setNumber: 1, reps: 10, weight: 60),
+        isNot(const CompletedSet(exerciseName: 'Bench', setNumber: 1, reps: 10)),
+      );
     });
   });
 

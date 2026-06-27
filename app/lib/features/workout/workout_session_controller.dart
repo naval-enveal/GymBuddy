@@ -68,6 +68,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
         exerciseName: exercise.exercise.name,
         setNumber: state.setNumber,
         reps: state.reps,
+        weight: state.weight,
       ),
     ];
 
@@ -79,6 +80,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
         status: SessionStatus.resting,
         completedSets: completed,
         restRemaining: rest < 0 ? 0 : rest,
+        clearWeight: true,
         clearFormCue: true,
       );
       await _source.stopTracking();
@@ -88,10 +90,29 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
         status: SessionStatus.completed,
         completedSets: completed,
         restRemaining: 0,
+        clearWeight: true,
         clearFormCue: true,
       );
       await _source.stopTracking();
     }
+  }
+
+  /// Manually sets the current set's rep count — the no-glasses logging path
+  /// and an override when the sensor miscounts. Clamped to >= 0; unlike a
+  /// sensor rep this never auto-advances (the lifter ends the set via
+  /// [completeSet]). No-op unless a set is in progress.
+  void setReps(int reps) {
+    if (!state.isExercising) return;
+    state = state.copyWith(reps: reps < 0 ? 0 : reps);
+  }
+
+  /// Records the weight lifted for the current set (e.g. kg on the bar). Pass
+  /// null — or a negative value — to clear it back to "not logged". No sensor
+  /// measures load, so this is always manual. No-op unless exercising.
+  void setWeight(double? weight) {
+    if (!state.isExercising) return;
+    final clean = (weight == null || weight < 0) ? null : weight;
+    state = state.copyWith(weight: clean, clearWeight: clean == null);
   }
 
   /// Skips the remaining rest and moves straight to the next set/exercise.
@@ -178,6 +199,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
       setNumber: nextSet,
       reps: 0,
       restRemaining: 0,
+      clearWeight: true,
       clearFormCue: true,
     );
     await _source.startTracking(state.plan.exercises[nextExercise].exercise);

@@ -38,6 +38,8 @@ class WorkoutScreen extends ConsumerWidget {
       SessionStatus.exercising => _ExercisingView(
           state: session,
           onCompleteSet: controller.completeSet,
+          onSetReps: controller.setReps,
+          onSetWeight: controller.setWeight,
           onStop: controller.stop,
         ),
       SessionStatus.resting => _RestingView(
@@ -242,11 +244,15 @@ class _ExercisingView extends StatelessWidget {
   const _ExercisingView({
     required this.state,
     required this.onCompleteSet,
+    required this.onSetReps,
+    required this.onSetWeight,
     required this.onStop,
   });
 
   final WorkoutSessionState state;
   final Future<void> Function() onCompleteSet;
+  final void Function(int) onSetReps;
+  final void Function(double?) onSetWeight;
   final Future<void> Function() onStop;
 
   @override
@@ -272,8 +278,22 @@ class _ExercisingView extends StatelessWidget {
                   ?.copyWith(color: AppColors.textMuted),
             ),
           const Spacer(),
-          RepCounter(reps: state.reps, target: state.targetReps),
+          // Rep counter flanked by manual +/- so the lifter can correct a
+          // miscount or log reps by hand when no sensor is counting.
+          _RepStepper(
+            reps: state.reps,
+            target: state.targetReps,
+            onSetReps: onSetReps,
+          ),
           const SizedBox(height: AppSpacing.lg),
+          // Weight is never sensed — the lifter logs it. Keyed by position so a
+          // new set starts with a fresh, empty field.
+          _WeightInput(
+            key: Key('weight-${state.exerciseIndex}-${state.setNumber}'),
+            initialWeight: state.weight,
+            onChanged: onSetWeight,
+          ),
+          const SizedBox(height: AppSpacing.md),
           _FormCueBanner(cue: state.formCue),
           const Spacer(),
           PrimaryButton(
@@ -285,6 +305,104 @@ class _ExercisingView extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           _StopButton(onStop: onStop),
         ],
+      ),
+    );
+  }
+}
+
+/// The big [RepCounter] with manual decrement/increment controls — the
+/// no-glasses logging path and an override for a sensor miscount. All it does
+/// is dispatch the new count to the controller (no local state).
+class _RepStepper extends StatelessWidget {
+  const _RepStepper({
+    required this.reps,
+    required this.target,
+    required this.onSetReps,
+  });
+
+  final int reps;
+  final int? target;
+  final void Function(int) onSetReps;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        IconButton.filledTonal(
+          key: const Key('rep-decrement'),
+          iconSize: 32,
+          onPressed: reps > 0 ? () => onSetReps(reps - 1) : null,
+          icon: const Icon(Icons.remove),
+          tooltip: 'Remove a rep',
+        ),
+        const SizedBox(width: AppSpacing.lg),
+        RepCounter(reps: reps, target: target),
+        const SizedBox(width: AppSpacing.lg),
+        IconButton.filledTonal(
+          key: const Key('rep-increment'),
+          iconSize: 32,
+          onPressed: () => onSetReps(reps + 1),
+          icon: const Icon(Icons.add),
+          tooltip: 'Add a rep',
+        ),
+      ],
+    );
+  }
+}
+
+/// Manual weight entry for the current set. Keeps a local [TextEditingController]
+/// for the text field but owns no session state — every edit is forwarded to
+/// the controller via [onChanged] (null when the field is empty/invalid).
+class _WeightInput extends StatefulWidget {
+  const _WeightInput({
+    required this.initialWeight,
+    required this.onChanged,
+    super.key,
+  });
+
+  final double? initialWeight;
+  final void Function(double?) onChanged;
+
+  @override
+  State<_WeightInput> createState() => _WeightInputState();
+}
+
+class _WeightInputState extends State<_WeightInput> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialWeight == null ? '' : _format(widget.initialWeight!),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String raw) {
+    final trimmed = raw.trim();
+    widget.onChanged(trimmed.isEmpty ? null : double.tryParse(trimmed));
+  }
+
+  static String _format(double value) =>
+      value == value.roundToDouble() ? value.toStringAsFixed(0) : '$value';
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 220),
+      child: TextField(
+        key: const Key('weight-input'),
+        controller: _controller,
+        onChanged: _onChanged,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        textAlign: TextAlign.center,
+        decoration: const InputDecoration(
+          labelText: 'Weight',
+          suffixText: 'kg',
+          isDense: true,
+        ),
       ),
     );
   }
@@ -406,6 +524,7 @@ class _CompletedSetTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final weight = set.weight;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: const BoxDecoration(
@@ -426,11 +545,23 @@ class _CompletedSetTile extends StatelessWidget {
                 ?.copyWith(color: AppColors.textMuted),
           ),
           const SizedBox(width: AppSpacing.md),
+          if (weight != null) ...[
+            Text('${_formatWeight(weight)} kg',
+                style: AppTypography.numericMedium),
+            Text(
+              ' × ',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: AppColors.textMuted),
+            ),
+          ],
           Text('${set.reps} reps', style: AppTypography.numericMedium),
         ],
       ),
     );
   }
+
+  static String _formatWeight(double value) =>
+      value == value.roundToDouble() ? value.toStringAsFixed(0) : '$value';
 }
 
 /// "Exercise n of m" progress line, shared by the exercising/resting views.

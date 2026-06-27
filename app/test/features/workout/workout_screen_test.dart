@@ -27,12 +27,20 @@ class _SeededController extends WorkoutSessionController {
   int completeSetCalls = 0;
   int skipRestCalls = 0;
   int stopCalls = 0;
+  final List<int> setRepsCalls = <int>[];
+  final List<double?> setWeightCalls = <double?>[];
 
   @override
   WorkoutSessionState build() => _seed;
 
   @override
   Future<void> completeSet() async => completeSetCalls++;
+
+  @override
+  void setReps(int reps) => setRepsCalls.add(reps);
+
+  @override
+  void setWeight(double? weight) => setWeightCalls.add(weight);
 
   @override
   Future<void> skipRest() async => skipRestCalls++;
@@ -212,6 +220,78 @@ void main() {
       expect(controller.completeSetCalls, 1);
     });
 
+    testWidgets('rep stepper forwards adjusted counts to the controller',
+        (tester) async {
+      final container = seeded(const WorkoutSessionState(
+        status: SessionStatus.exercising,
+        plan: _seedPlan,
+        exerciseIndex: 0,
+        setNumber: 1,
+        reps: 5,
+        restRemaining: 0,
+        completedSets: [],
+      ));
+
+      await _pump(tester, container);
+
+      final controller = container.read(
+        workoutSessionControllerProvider.notifier,
+      ) as _SeededController;
+
+      await tester.tap(find.byKey(const Key('rep-increment')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('rep-decrement')));
+      await tester.pump();
+
+      // Increment from 5 → 6, decrement from 5 → 4 (both off the seeded reps).
+      expect(controller.setRepsCalls, [6, 4]);
+    });
+
+    testWidgets('decrement is disabled at zero reps', (tester) async {
+      final container = seeded(const WorkoutSessionState(
+        status: SessionStatus.exercising,
+        plan: _seedPlan,
+        exerciseIndex: 0,
+        setNumber: 1,
+        reps: 0,
+        restRemaining: 0,
+        completedSets: [],
+      ));
+
+      await _pump(tester, container);
+
+      final decrement = tester.widget<IconButton>(
+        find.byKey(const Key('rep-decrement')),
+      );
+      expect(decrement.onPressed, isNull);
+    });
+
+    testWidgets('weight input forwards entered load to the controller',
+        (tester) async {
+      final container = seeded(const WorkoutSessionState(
+        status: SessionStatus.exercising,
+        plan: _seedPlan,
+        exerciseIndex: 0,
+        setNumber: 1,
+        reps: 5,
+        restRemaining: 0,
+        completedSets: [],
+      ));
+
+      await _pump(tester, container);
+
+      await tester.enterText(find.byKey(const Key('weight-input')), '62.5');
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('weight-input')), '');
+      await tester.pump();
+
+      final controller = container.read(
+        workoutSessionControllerProvider.notifier,
+      ) as _SeededController;
+      // A valid number forwards as a double; clearing the field forwards null.
+      expect(controller.setWeightCalls, [62.5, null]);
+    });
+
     testWidgets('surfaces the latest form cue', (tester) async {
       final container = seeded(const WorkoutSessionState(
         status: SessionStatus.exercising,
@@ -284,7 +364,11 @@ void main() {
               completedSets: [
                 CompletedSet(exerciseName: 'Squat', setNumber: 1, reps: 12),
                 CompletedSet(exerciseName: 'Squat', setNumber: 2, reps: 11),
-                CompletedSet(exerciseName: 'Bench', setNumber: 1, reps: 10),
+                CompletedSet(
+                    exerciseName: 'Bench',
+                    setNumber: 1,
+                    reps: 10,
+                    weight: 100),
               ],
             )),
           ),
@@ -300,6 +384,8 @@ void main() {
       expect(find.byType(RepCounter), findsNothing);
       expect(find.text('3 sets · 33 reps'), findsOneWidget);
       expect(find.text('Bench'), findsOneWidget);
+      // The Bench set logged a weight, so the tile shows the load.
+      expect(find.text('100 kg'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('workout-done-button')));
       await tester.pump();
