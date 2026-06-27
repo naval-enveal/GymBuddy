@@ -14,17 +14,23 @@
 ---
 
 ## Next up
-**M8 is in progress** on branch `m8-pose` (cut from `dev`). Gate cleared by human
-decision: build mock-first, test on device later. Tasks 1–4 done.
-**Next: task 5 — "UI marks exercises form-tracked vs rep-tracked-only"** (the last
-M8 task): surface the pose catalog's three-way classification in the plans UI. The
-catalog is now the single source of truth — `poseTrackingFor(name)` in
-`app/lib/core/pose/pose_exercise_catalog.dart` returns a `PoseTracking`
-(`none` / `repsOnly` / `formTracked`); `plan_detail_screen.dart`'s `_TrackingBadge`
-currently keys off the *server* `PlanExercise.formTracked` flag (only two states)
-and should instead read `poseTrackingFor(exercise.name)` so it shows form-tracked
-vs rep-tracked-only vs untracked. When that's done, all M8 tasks are checked —
-open the PR `Milestone M8: pose` from `m8-pose` into `dev` and stop.
+**M8 is complete** on branch `m8-pose` (cut from `dev`). All five tasks are
+checked. A PR `Milestone M8: pose` has been opened from `m8-pose` into `dev` —
+awaiting human review + merge. Do not merge, do not cut the next branch.
+**After the merge, M9 (AI layer + premium) is next** — but it is tagged
+`[HUMAN GATE]` and not yet `[GATE CLEARED]`, so the next autonomous run must
+print `HUMAN_GATE: M9` and stop until a human clears the gate.
+
+Task 5 design notes (done): `plan_detail_screen.dart`'s `_TrackingBadge` now
+takes a `PoseTracking` and is built from `poseTrackingFor(exercise.name)` (the
+catalog in `app/lib/core/pose/pose_exercise_catalog.dart` — single source of
+truth), not the server `PlanExercise.formTracked` flag. A `switch` maps the three
+states to (key, label, icon, color): `formTracked` → `exercise-form-tracked` /
+"Form tracked" / visibility / accent; `repsOnly` → `exercise-reps-only` / "Reps
+only" / numbers / muted; `none` → `exercise-not-tracked` / "Not tracked" /
+visibility-off / muted (the new third state — previously the server flag only
+gave two). So the badge can never promise form feedback the pose layer lacks
+rules for, matching the session-mapper's catalog-driven `formTracked`.
 
 Catalog design notes (task 4, done): "which exercises the glasses can track from
 POV" is now one authoritative module, not a server flag the client trusts. Plans
@@ -729,7 +735,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Rep detection fed by active sensor source
 - [x] Basic joint-angle checks
 - [x] Initial mirror/POV-friendly exercise set
-- [ ] UI marks exercises form-tracked vs rep-tracked-only
+- [x] UI marks exercises form-tracked vs rep-tracked-only
 
 ### M9 — AI layer + premium  [HUMAN GATE]  `[ ]`
 - [ ] Server-side Claude API plan-generation service (profile + history + vitals)
@@ -750,6 +756,17 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M8 · UI marks exercises form-tracked vs rep-tracked-only vs
+  untracked (M8 task 5, last M8 task). `plan_detail_screen.dart`'s `_TrackingBadge`
+  now keys off the pose catalog's three-way `poseTrackingFor(exercise.name)`
+  (`PoseTracking` form-tracked / reps-only / none) — the single source of truth —
+  instead of the server's two-state `PlanExercise.formTracked` flag, so the badge
+  can never promise form feedback the pose layer has no rules for. Adds a third
+  "Not tracked" state (`exercise-not-tracked`, dimmed visibility-off icon) for
+  exercises the pose pipeline doesn't recognise. 1 new widget test (catalog
+  overrides the server flag across all three states: "Back Squat"→form,
+  "Bicep Curl"→reps-only, "Plank"→not-tracked). `flutter analyze` clean,
+  `flutter test` 302/302 green. All M8 tasks complete.
 - 2026-06-27 · M8 · Initial mirror/POV-friendly exercise set (M8 task 4). New
   `app/lib/core/pose/pose_exercise_catalog.dart` is the single source of truth for
   pose-trackability: a `PoseTracking` enum (`none`/`repsOnly`/`formTracked`),

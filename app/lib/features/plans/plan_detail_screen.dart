@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:gymbuddy/core/design/design.dart';
+import 'package:gymbuddy/core/pose/pose_exercise_catalog.dart';
 import 'package:gymbuddy/features/plans/active_plan_controller.dart';
 import 'package:gymbuddy/features/plans/plan_models.dart';
 
@@ -243,7 +244,7 @@ class _ExerciseRow extends StatelessWidget {
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
-                _TrackingBadge(formTracked: exercise.formTracked),
+                _TrackingBadge(tracking: poseTrackingFor(exercise.name)),
               ],
             ),
             const SizedBox(height: AppSpacing.xs),
@@ -283,22 +284,41 @@ class _ExerciseRow extends StatelessWidget {
   }
 }
 
-/// A small badge marking an exercise as form-tracked (the buddy watches your
-/// form) or rep-tracked-only.
+/// A small badge marking how the glasses track an exercise, keyed off the pose
+/// catalog's three-way [PoseTracking] classification (the single source of
+/// truth — see [poseTrackingFor]) rather than the server's two-state flag:
+/// form-tracked (the buddy watches your form), rep-tracked-only, or not
+/// pose-trackable at all (reps fall back to native/manual logging).
 class _TrackingBadge extends StatelessWidget {
-  const _TrackingBadge({required this.formTracked});
+  const _TrackingBadge({required this.tracking});
 
-  final bool formTracked;
+  final PoseTracking tracking;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final label = formTracked ? 'Form tracked' : 'Reps only';
-    final color = formTracked ? AppColors.accent : AppColors.textMuted;
-    return Container(
-      key: Key(
-        formTracked ? 'exercise-form-tracked' : 'exercise-reps-only',
+    final (key, label, icon, color) = switch (tracking) {
+      PoseTracking.formTracked => (
+        'exercise-form-tracked',
+        'Form tracked',
+        Icons.visibility_outlined,
+        AppColors.accent,
       ),
+      PoseTracking.repsOnly => (
+        'exercise-reps-only',
+        'Reps only',
+        Icons.numbers,
+        AppColors.textMuted,
+      ),
+      PoseTracking.none => (
+        'exercise-not-tracked',
+        'Not tracked',
+        Icons.visibility_off_outlined,
+        AppColors.textMuted,
+      ),
+    };
+    return Container(
+      key: Key(key),
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.xs,
         vertical: AppSpacing.xxs,
@@ -310,11 +330,7 @@ class _TrackingBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            formTracked ? Icons.visibility_outlined : Icons.numbers,
-            size: 14,
-            color: color,
-          ),
+          Icon(icon, size: 14, color: color),
           const SizedBox(width: AppSpacing.xxs),
           Text(
             label,
