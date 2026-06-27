@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:gymbuddy/core/pose/pose_detector.dart';
+import 'package:gymbuddy/core/pose/tflite_pose_detector.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 
 /// Control channel — `connect`/`startTracking`/`stopTracking`/`dispose`.
@@ -16,6 +18,12 @@ const String kGlassesFormCuesChannel = 'gymbuddy/glasses/formCues';
 /// confidence?}`. Independent of tracking — the second input path from the
 /// glasses, a control signal that opens a hands-free Q&A turn.
 const String kGlassesWakeChannel = 'gymbuddy/glasses/wake';
+
+/// Streaming raw POV camera frames for on-device pose estimation:
+/// `{rgb (bytes), width, height, timestampMs?}`. Feeds the [PoseDetector] (M8).
+/// Native emits nothing until the DAT SDK camera stream is live, so the pose
+/// detector simply stays idle (its [PoseDetector.frames] never fires).
+const String kGlassesCameraChannel = 'gymbuddy/glasses/camera';
 
 /// The real, glasses-backed [WorkoutSensorSource]: a thin Dart binding over the
 /// platform channels the Android (Kotlin) and iOS (Swift) sides expose for the
@@ -35,16 +43,26 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     EventChannel? repsChannel,
     EventChannel? formCuesChannel,
     EventChannel? wakeChannel,
+    EventChannel? cameraChannel,
+    PoseDetector? poseDetector,
   })  : _methods = methodChannel ?? const MethodChannel(kGlassesMethodChannel),
         _repsChannel = repsChannel ?? const EventChannel(kGlassesRepsChannel),
         _formCuesChannel =
             formCuesChannel ?? const EventChannel(kGlassesFormCuesChannel),
-        _wakeChannel = wakeChannel ?? const EventChannel(kGlassesWakeChannel);
+        _wakeChannel = wakeChannel ?? const EventChannel(kGlassesWakeChannel),
+        _cameraChannel =
+            cameraChannel ?? const EventChannel(kGlassesCameraChannel) {
+    // The real camera path: on-device MoveNet fed by the glasses' POV camera
+    // frames. Injectable so tests run with a MockPoseDetector and no FFI.
+    _poseDetector = poseDetector ?? TflitePoseDetector(frameSource: cameraFrames);
+  }
 
   final MethodChannel _methods;
   final EventChannel _repsChannel;
   final EventChannel _formCuesChannel;
   final EventChannel _wakeChannel;
+  final EventChannel _cameraChannel;
+  late final PoseDetector _poseDetector;
 
   /// Populated by [connect] from the native handshake; conservatively empty
   /// until then so capability-gated UI never shows before we've connected.
@@ -54,10 +72,22 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   Stream<RepEvent>? _reps;
   Stream<FormCue>? _formCues;
   Stream<WakeEvent>? _wake;
+  Stream<PoseInput>? _cameraFrames;
   bool _disposed = false;
 
   @override
   SensorCapabilities get capabilities => _capabilities;
+
+  /// The on-device pose detector fed by the glasses' POV camera. The rep/form
+  /// pipeline (M8 task 2+) listens to its [PoseDetector.frames]; it stays idle
+  /// (model not ready, or no camera frames) until both the model is bundled and
+  /// the native camera stream is live.
+  PoseDetector get poseDetector => _poseDetector;
+
+  /// Raw POV camera frames decoded off the native camera channel, fed to the
+  /// pose detector. Lazily cached so a single broadcast subscription is shared.
+  Stream<PoseInput> get cameraFrames => _cameraFrames ??=
+      _cameraChannel.receiveBroadcastStream().map(_decodeFrame);
 
   @override
   Stream<RepEvent> get reps =>
@@ -95,9 +125,14 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
       repCounting: caps?['repCounting'] == true,
       formTracking: caps?['formTracking'] == true,
     );
-    return result?['availability'] == 'available'
-        ? SensorAvailability.available
-        : SensorAvailability.unavailable;
+    if (result?['availability'] == 'available') {
+      // Bring up on-device pose now that the glasses are connected. Best-effort:
+      // a missing model (init returns false) just leaves pose idle — the rep
+      // path falls back — and never blocks the connection.
+      await _poseDetector.init();
+      return SensorAvailability.available;
+    }
+    return SensorAvailability.unavailable;
   }
 
   @override
@@ -135,6 +170,7 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    await _poseDetector.dispose();
     try {
       await _methods.invokeMethod<void>('dispose');
     } on PlatformException {
@@ -159,6 +195,18 @@ class MetaGlassesSensorSource implements WorkoutSensorSource {
     return FormCue(
       severity: _severityFrom(map['severity'] as String?),
       message: (map['message'] as String?) ?? '',
+    );
+  }
+
+  PoseInput _decodeFrame(dynamic event) {
+    final map = (event as Map).cast<Object?, Object?>();
+    final ts = (map['timestampMs'] as num?)?.toInt();
+    return PoseInput(
+      rgb: map['rgb'] as Uint8List,
+      width: (map['width'] as num).toInt(),
+      height: (map['height'] as num).toInt(),
+      timestamp:
+          ts == null ? null : DateTime.fromMillisecondsSinceEpoch(ts),
     );
   }
 

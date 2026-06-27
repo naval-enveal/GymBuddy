@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/pose/pose_detector.dart';
 import 'package:gymbuddy/sensors/meta_glasses_sensor_source.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 
@@ -11,6 +14,7 @@ void main() {
   const repsChannel = EventChannel(kGlassesRepsChannel);
   const formCuesChannel = EventChannel(kGlassesFormCuesChannel);
   const wakeChannel = EventChannel(kGlassesWakeChannel);
+  const cameraChannel = EventChannel(kGlassesCameraChannel);
 
   // Records the control-channel traffic the source emits, and replies with
   // whatever the current test queued up.
@@ -31,6 +35,7 @@ void main() {
     messenger.setMockStreamHandler(repsChannel, null);
     messenger.setMockStreamHandler(formCuesChannel, null);
     messenger.setMockStreamHandler(wakeChannel, null);
+    messenger.setMockStreamHandler(cameraChannel, null);
   });
 
   group('connect', () {
@@ -43,7 +48,7 @@ void main() {
               'formTracking': true,
             },
           };
-      final source = MetaGlassesSensorSource();
+      final source = MetaGlassesSensorSource(poseDetector: MockPoseDetector());
 
       final availability = await source.connect();
 
@@ -81,7 +86,7 @@ void main() {
               'formTracking': false,
             },
           };
-      final source = MetaGlassesSensorSource();
+      final source = MetaGlassesSensorSource(poseDetector: MockPoseDetector());
 
       await source.connect();
       expect(
@@ -366,6 +371,77 @@ void main() {
       );
       final source = MetaGlassesSensorSource();
       expect(source.wakeEvents.isBroadcast, isTrue);
+    });
+  });
+
+  group('camera frames + pose detector', () {
+    test('decodes native camera frame maps onto PoseInput', () {
+      messenger.setMockStreamHandler(
+        cameraChannel,
+        MockStreamHandler.inline(
+          onListen: (arguments, sink) {
+            sink.success(<String, Object?>{
+              'rgb': Uint8List.fromList(List<int>.filled(2 * 1 * 3, 7)),
+              'width': 2,
+              'height': 1,
+              'timestampMs': 1000,
+            });
+          },
+        ),
+      );
+      final source = MetaGlassesSensorSource(poseDetector: MockPoseDetector());
+
+      expect(
+        source.cameraFrames,
+        emits(
+          predicate<PoseInput>(
+            (p) =>
+                p.width == 2 &&
+                p.height == 1 &&
+                p.rgb.length == 6 &&
+                p.timestamp == DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        ),
+      );
+    });
+
+    test('connect initialises the pose detector when available', () async {
+      methodReply = (call) => <String, Object?>{
+            'availability': 'available',
+            'capabilities': <String, Object?>{
+              'repCounting': true,
+              'formTracking': true,
+            },
+          };
+      final pose = MockPoseDetector();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      expect(pose.isReady, isFalse);
+      await source.connect();
+      expect(pose.isReady, isTrue);
+      expect(source.poseDetector, same(pose));
+    });
+
+    test('connect leaves the pose detector idle when unavailable', () async {
+      methodReply = (call) => <String, Object?>{'availability': 'unavailable'};
+      final pose = MockPoseDetector();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      await source.connect();
+      expect(pose.isReady, isFalse);
+    });
+
+    test('dispose tears down the pose detector', () async {
+      final pose = MockPoseDetector();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      await source.dispose();
+
+      // A disposed MockPoseDetector rejects further use.
+      expect(
+        () => pose.emitFrame(const PoseFrame(keypoints: [])),
+        throwsStateError,
+      );
     });
   });
 }
