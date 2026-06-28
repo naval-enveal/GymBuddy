@@ -895,7 +895,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Premium gating enforced server-side
 - [x] App never holds the Claude API key
 
-### M10 — Polish, analytics, beta  [HUMAN GATE]  `[ ]`
+### M10 — Polish, analytics, beta  [GATE CLEARED]  `[ ]`
 - [ ] Empty / error / loading states across features
 - [ ] Accessibility pass
 - [ ] Analytics + crash reporting
