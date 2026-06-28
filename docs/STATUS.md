@@ -14,15 +14,14 @@
 ---
 
 ## Next up
-**M9 (AI layer + premium) is COMPLETE** on branch `m9-ai` (cut from `dev`) — all
-five tasks checked and pushed to `origin/m9-ai`: plan generation (1), coaching
-service (2), RevenueCat paywall + premium state (3), server-side premium gating
-(4), and app-never-holds-the-key verification + regression guard (5). **Next up:
-open PR `Milestone M9: ai` from `m9-ai` into `dev`** — do it manually (`gh` is
-unauthenticated here) and stop; a human reviews and merges, then the next run cuts
-a fresh branch from `dev` for **M10 — Polish, analytics, beta**, which is tagged
-`[HUMAN GATE]` and NOT yet `[GATE CLEARED]` (so the first M10 run will print
-`HUMAN_GATE: M10` and stop until a human clears the gate).
+**M9 (AI layer + premium) is COMPLETE and merged to `dev`** via PR "Milestone M9:
+ai" (m9-ai → dev, merged 2026-06-28) — all five tasks shipped: plan generation
+(1), coaching service (2), RevenueCat paywall + premium state (3), server-side
+premium gating (4), and app-never-holds-the-key verification + regression guard
+(5). **Next up: M10 — Polish, analytics, beta** — cut a fresh branch from `dev`
+and begin the first unchecked task. M10 is tagged `[HUMAN GATE]` and NOT yet
+`[GATE CLEARED]`, so the first autonomous run will print `HUMAN_GATE: M10` and
+stop until a human clears the gate by changing its tag to `[GATE CLEARED]`.
 
 Task 5 design notes (done): "the app never holds the Claude API key" — verified
 end to end and locked with a guard. The key is server-side only by construction —
