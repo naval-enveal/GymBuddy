@@ -14,35 +14,9 @@
 ---
 
 ## Next up
-**M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
-branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
-Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), 3
-(**Analytics + crash reporting**), 4 (**TestFlight pipeline**), 5
-(**Firebase App Distribution pipeline**), and 6 (**Meta glasses release-channel
-build target**) are **done** and pushed: a shared
-`StateMessage` widget backs the empty/error states; the glanceable design-system
-widgets (RepCounter/RestTimer/StatRing/Sparkline/MetricTile) expose single
-spoken `Semantics` labels with optional overrides, the unlabeled IconButtons
-gained tooltips, and the grayscale contrast ramp was confirmed at WCAG AA;
-product analytics + crash reporting now run behind a mock-first
-`AnalyticsService` seam (Firebase Analytics + Crashlytics impl wired at the
-composition root, mock default + generic crash handlers as the Firebase-free
-fallback) with call sites at auth (login/sign_up + setUserId/clear) and workout
-(started/completed); an iOS TestFlight pipeline (fastlane `beta` lane + a
-tag/dispatch-gated GitHub Actions workflow, App Store Connect API-key auth,
-`match` for signing, all credentials via env/secrets); and an Android Firebase
-App Distribution pipeline (fastlane `beta` lane uploading a signed release APK
-via the `firebase_app_distribution` plugin, service-account auth, env-driven
-release signing in `build.gradle.kts` with a debug fallback, a tag/dispatch-gated
-workflow, all credentials via env/secrets); and the glasses (DAT SDK) path is now
-a distinct, gated **release-channel build target** — the default consumer build
-ships mock-only (single-source flag `kGlassesChannelEnabled` /
-`--dart-define=GLASSES_ENABLED=true`, resolver short-circuits to the mock when
-off; Android `build.gradle.kts` links vendored SDK artifacts only for the target;
-gated `glasses-channel-build.yml` workflow; README documented).
-**Next up: M10 is complete — all six tasks checked.** Open PR `Milestone M10:
-beta` from `m10-polish` into `dev` and stop for human review (do not merge, do
-not cut the next branch).
+**All milestones complete. BUILD_COMPLETE.**
+M10 (`m10-polish`) was merged into `dev` on 2026-06-28. M0–M10 are all shipped.
+The build loop will print `BUILD_COMPLETE` and stop on the next invocation.
 
 Meta glasses release-channel build-target design notes (task 6, done): the
 glasses (DAT SDK) hardware path is now opt-in per build, so the ordinary App
@@ -1124,7 +1098,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Premium gating enforced server-side
 - [x] App never holds the Claude API key
 
-### M10 — Polish, analytics, beta  [GATE CLEARED]  `[ ]`
+### M10 — Polish, analytics, beta  [GATE CLEARED]  `[x]`
 - [x] Empty / error / loading states across features
 - [x] Accessibility pass
 - [x] Analytics + crash reporting
@@ -1136,6 +1110,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · PR `Milestone M10: beta` (m10-polish → dev) merged by human reviewer. All six tasks shipped; M10 complete. All milestones M0–M10 done — BUILD_COMPLETE.
 - 2026-06-28 · M10 · Meta glasses release-channel build target (M10 task 6).
   Made the glasses (DAT SDK) path a distinct, gated build target so the default
   consumer build ships mock-only and never bundles the proprietary SDK or touches
