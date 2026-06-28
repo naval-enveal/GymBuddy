@@ -64,6 +64,7 @@ void main() {
       var mockBuilt = false;
 
       final resolved = await resolveWorkoutSensorSource(
+        glassesEnabled: true,
         glassesFactory: () => glasses,
         mockFactory: () {
           mockBuilt = true;
@@ -84,6 +85,7 @@ void main() {
       final mock = _FakeSensorSource();
 
       final resolved = await resolveWorkoutSensorSource(
+        glassesEnabled: true,
         glassesFactory: () => glasses,
         mockFactory: () => mock,
       );
@@ -98,6 +100,7 @@ void main() {
       final mock = _FakeSensorSource();
 
       final resolved = await resolveWorkoutSensorSource(
+        glassesEnabled: true,
         glassesFactory: () => glasses,
         mockFactory: () => mock,
       );
@@ -106,18 +109,50 @@ void main() {
       expect(glasses.disposed, isTrue);
     });
 
-    test('defaults resolve to a MockSensorSource with no glasses present',
+    test('skips the glasses entirely when the channel is disabled', () async {
+      // The default consumer build: the glasses source must never be constructed
+      // or probed, so the native channel is never touched and the DAT SDK need
+      // not be present.
+      var glassesBuilt = false;
+      final mock = _FakeSensorSource();
+
+      final resolved = await resolveWorkoutSensorSource(
+        glassesEnabled: false,
+        glassesFactory: () {
+          glassesBuilt = true;
+          return _FakeSensorSource();
+        },
+        mockFactory: () => mock,
+      );
+
+      expect(resolved, same(mock));
+      expect(glassesBuilt, isFalse,
+          reason: 'glasses source never built when channel off');
+    });
+
+    test('defaults to the disabled channel and returns a MockSensorSource',
+        () async {
+      // With no `--dart-define=GLASSES_ENABLED=true`, kGlassesChannelEnabled is
+      // false, so the default invocation (as in main.dart) resolves straight to
+      // the real MockSensorSource — the hardware-free path the app ships.
+      final resolved = await resolveWorkoutSensorSource();
+
+      expect(resolved, isA<MockSensorSource>());
+      await resolved.dispose();
+    });
+
+    test('enabled channel with no native handler falls back to a MockSensorSource',
         () async {
       // No native handler registered: the real MetaGlassesSensorSource hits a
       // MissingPluginException, degrades to unavailable, and the resolver hands
-      // back the real MockSensorSource — the hardware-free path the app ships.
+      // back the real MockSensorSource — graceful even on a glasses build.
       final binding = TestWidgetsFlutterBinding.ensureInitialized();
       binding.defaultBinaryMessenger.setMockMethodCallHandler(
         const MethodChannel(kGlassesMethodChannel),
         null,
       );
 
-      final resolved = await resolveWorkoutSensorSource();
+      final resolved = await resolveWorkoutSensorSource(glassesEnabled: true);
 
       expect(resolved, isA<MockSensorSource>());
       await resolved.dispose();

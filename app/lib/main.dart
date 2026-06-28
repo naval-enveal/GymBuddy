@@ -53,6 +53,11 @@ Future<void> main() async {
   // composition root and override the (synchronous) sensor provider with
   // whatever it resolves to — the glasses when they're available, otherwise the
   // mock. The session controller reads `workoutSensorSourceProvider` unchanged.
+  //
+  // M10 glasses release channel: the resolver is gated by `kGlassesChannelEnabled`
+  // (`--dart-define=GLASSES_ENABLED=true`). The default consumer build keeps the
+  // channel off, so this returns the mock without ever touching the native
+  // glasses channel; only the glasses-channel build target opts into the probe.
   final sensorSource = await resolveWorkoutSensorSource();
 
   // M9 premium: when a RevenueCat public SDK key is provided, configure the SDK

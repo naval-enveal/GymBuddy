@@ -23,6 +23,16 @@ fun signingValue(propKey: String, envKey: String): String? =
 val releaseStoreFile = signingValue("storeFile", "ANDROID_KEYSTORE_PATH")
 val hasReleaseSigning = !releaseStoreFile.isNullOrBlank()
 
+// Meta glasses release channel (M10). The native mirror of the Dart
+// `GLASSES_ENABLED` dart-define: pass `-Pglasses=true` (or set GLASSES_ENABLED=true)
+// to build the glasses-channel target. The Meta Device Access Toolkit is
+// proprietary and not on a public Maven repo, so it is never committed; drop the
+// vendored `.aar`/`.jar` into `app/android/app/libs/` for this target only. The
+// SDK is detected reflectively at runtime (see DatSdkClient.kt), so the default
+// consumer build — which links nothing here — falls back to MockSensorSource.
+val glassesChannel = (project.findProperty("glasses") as String?)?.toBoolean()
+    ?: System.getenv("GLASSES_ENABLED").toBoolean()
+
 android {
     namespace = "com.gymbuddy.gymbuddy"
     compileSdk = flutter.compileSdkVersion
@@ -74,6 +84,17 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+dependencies {
+    // Link any vendored DAT SDK artifacts only for the glasses release channel.
+    // Harmless when libs/ is empty (fileTree matches nothing); the default
+    // consumer build never references it.
+    if (glassesChannel) {
+        implementation(
+            fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))),
+        )
     }
 }
 

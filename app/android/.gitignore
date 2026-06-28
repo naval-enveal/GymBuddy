@@ -12,3 +12,8 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Vendored Meta DAT SDK artifacts for the glasses release channel — proprietary,
+# never committed. Dropped into app/libs/ only for the glasses-channel build.
+app/libs/*.aar
+app/libs/*.jar

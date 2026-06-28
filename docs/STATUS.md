@@ -17,8 +17,9 @@
 **M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
 branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
 Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), 3
-(**Analytics + crash reporting**), 4 (**TestFlight pipeline**), and 5
-(**Firebase App Distribution pipeline**) are **done** and pushed: a shared
+(**Analytics + crash reporting**), 4 (**TestFlight pipeline**), 5
+(**Firebase App Distribution pipeline**), and 6 (**Meta glasses release-channel
+build target**) are **done** and pushed: a shared
 `StateMessage` widget backs the empty/error states; the glanceable design-system
 widgets (RepCounter/RestTimer/StatRing/Sparkline/MetricTile) expose single
 spoken `Semantics` labels with optional overrides, the unlabeled IconButtons
@@ -33,10 +34,47 @@ tag/dispatch-gated GitHub Actions workflow, App Store Connect API-key auth,
 App Distribution pipeline (fastlane `beta` lane uploading a signed release APK
 via the `firebase_app_distribution` plugin, service-account auth, env-driven
 release signing in `build.gradle.kts` with a debug fallback, a tag/dispatch-gated
-workflow, all credentials via env/secrets).
-**Next up: task 6 — Meta glasses release-channel build target** (the last M10
-task). When all six M10 tasks are checked, open PR `Milestone M10: beta` from
-`m10-polish` into `dev` and stop for human review.
+workflow, all credentials via env/secrets); and the glasses (DAT SDK) path is now
+a distinct, gated **release-channel build target** — the default consumer build
+ships mock-only (single-source flag `kGlassesChannelEnabled` /
+`--dart-define=GLASSES_ENABLED=true`, resolver short-circuits to the mock when
+off; Android `build.gradle.kts` links vendored SDK artifacts only for the target;
+gated `glasses-channel-build.yml` workflow; README documented).
+**Next up: M10 is complete — all six tasks checked.** Open PR `Milestone M10:
+beta` from `m10-polish` into `dev` and stop for human review (do not merge, do
+not cut the next branch).
+
+Meta glasses release-channel build-target design notes (task 6, done): the
+glasses (DAT SDK) hardware path is now opt-in per build, so the ordinary App
+Store / Play Store artifact ships **mock-only** — it neither bundles Meta's
+proprietary DAT SDK nor touches the native glasses channel. New
+`app/lib/sensors/glasses_build_config.dart` `kGlassesChannelEnabled`
+(`bool.fromEnvironment('GLASSES_ENABLED', defaultValue: false)`, a compile-time
+const) is the single source of truth. `resolveWorkoutSensorSource` gained a
+`glassesEnabled` param (defaulting to it): when off it returns `mockFactory()`
+immediately — the glasses source is never even constructed, so no native channel
+call and no SDK requirement; when on it runs the existing probe-and-fallback
+(graceful to mock if no SDK/pair). `main.dart`'s no-arg call picks up the default,
+so the default build is mock-only with no code change at the call site. Native
+mirror in `app/android/app/build.gradle.kts`: `glassesChannel` reads
+`-Pglasses=true` or `GLASSES_ENABLED` env and, only when true, links any vendored
+`.aar`/`.jar` from `app/android/app/libs/` (gitignored — the SDK is proprietary,
+never committed; `fileTree` is a no-op when empty, so CI/default builds link
+nothing and the reflective runtime detection in `DatSdkClient.kt` finds nothing →
+unavailable → mock). New gated workflow
+`.github/workflows/glasses-channel-build.yml` (`glasses-v*` tag / manual dispatch
+only — off ordinary pushes and off the plain `v*` TestFlight/Firebase pipelines)
+runs `flutter test` then builds the glasses-channel APK (ubuntu) + iOS app
+(`macos-14`, `--no-codesign`) with `--dart-define=GLASSES_ENABLED=true` +
+`GLASSES_ENABLED=true` env, uploading the APK artifact. README gained a "Meta
+glasses release channel" section. iOS native vendoring (framework into the Xcode
+project) is documented, not scripted — no SDK to vendor headless. 3 new tests
+(`glasses_build_config_test.dart`: default-off; `sensor_source_resolver_test.dart`:
+skips/never-builds glasses when disabled, enabled-with-no-native-handler →
+`MockSensorSource`; the three existing probe tests now pass `glassesEnabled: true`).
+`flutter analyze` clean, `flutter test` 353/353 green (+3). (The native
+glasses-channel link + a real DAT SDK build can't run headless — the Dart gate +
+the reflective-fallback posture are what's verified.)
 
 Firebase App Distribution pipeline design notes (task 5, done): the Android beta
 analogue of the iOS TestFlight pipeline, mirroring its shape. Lives in
@@ -1092,12 +1130,31 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Analytics + crash reporting
 - [x] TestFlight pipeline
 - [x] Firebase App Distribution pipeline
-- [ ] Meta glasses release-channel build target
+- [x] Meta glasses release-channel build target
 
 ---
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · Meta glasses release-channel build target (M10 task 6).
+  Made the glasses (DAT SDK) path a distinct, gated build target so the default
+  consumer build ships mock-only and never bundles the proprietary SDK or touches
+  the native glasses channel. New `app/lib/sensors/glasses_build_config.dart`
+  `kGlassesChannelEnabled` (`bool.fromEnvironment('GLASSES_ENABLED')`, default
+  false) is the single source of truth; `resolveWorkoutSensorSource` gained a
+  `glassesEnabled` param (defaulting to it) that short-circuits straight to
+  `MockSensorSource` — never constructing/probing the glasses source — when off,
+  and probes-then-falls-back as before when on. `main.dart` picks up the default.
+  Android `build.gradle.kts` mirrors the flag natively (`-Pglasses=true` /
+  `GLASSES_ENABLED` env) and links any vendored DAT SDK artifacts from
+  `app/android/app/libs/` (gitignored, never committed) only for this target.
+  New gated workflow `.github/workflows/glasses-channel-build.yml` (`glasses-v*`
+  tag / manual dispatch, off ordinary pushes and the plain `v*` pipelines) builds
+  the glasses-channel APK + iOS app with `--dart-define=GLASSES_ENABLED=true`
+  after a `flutter test` gate. README documents the target. The SDK is detected
+  reflectively at runtime, so a glasses build with no SDK vendored degrades to
+  the mock. `flutter analyze` clean, `flutter test` 353/353 green (+3: build-config
+  default-off, resolver skips-when-disabled, resolver enabled-no-handler→mock).
 - 2026-06-28 · M10 · Firebase App Distribution pipeline (M10 task 5). Added the
   Android beta-delivery analogue of TestFlight: `app/android/fastlane/` (`beta`
   lane — `firebase_app_distribution` plugin, service-account auth, uploads a
