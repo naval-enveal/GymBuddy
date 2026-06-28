@@ -1,0 +1,90 @@
+name: Android — Firebase App Distribution
+
+# Beta delivery to Firebase App Distribution — the Android analogue of
+# ios-testflight.yml. Deliberately NOT run on every push: it builds a signed
+# release APK and ships it to testers, so it triggers only on a release tag
+# (v1.2.3) or a manual dispatch. The regular `ci.yml` keeps gating every push.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this manual beta build is being cut (used as release notes)"
+        required: false
+        default: "manual beta build"
+
+jobs:
+  distribute:
+    name: Build + upload to Firebase App Distribution
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    env:
+      # Firebase App Distribution target + auth.
+      FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+      FIREBASE_DISTRIBUTION_GROUPS: ${{ secrets.FIREBASE_DISTRIBUTION_GROUPS }}
+      FIREBASE_RELEASE_NOTES: ${{ github.event.inputs.reason }}
+      # Release-keystore credentials (the keystore file itself is decoded from a
+      # base64 secret in a step below).
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # Public RevenueCat key compiled into the release build (not a secret, but
+      # kept in secrets so the key isn't hard-coded in the repo).
+      REVENUECAT_API_KEY: ${{ secrets.REVENUECAT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Set up Ruby (fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: app/android
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      # Decode the release keystore + the Firebase service-account JSON from
+      # base64 secrets into runner-temp files, then export their paths so the
+      # Gradle signing config and the fastlane lane can read them. Nothing
+      # secret is written into the repo tree.
+      - name: Decode release keystore
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Decode Firebase service account
+        run: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_BASE64" | base64 --decode > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "FIREBASE_SERVICE_CREDENTIALS_FILE=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+        env:
+          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+
+      # Build the signed release APK. The Gradle release signingConfig picks up
+      # ANDROID_KEYSTORE_PATH/_PASSWORD/_KEY_ALIAS/_KEY_PASSWORD from the env.
+      - name: Build release APK
+        run: flutter build apk --release --dart-define=REVENUECAT_API_KEY="$REVENUECAT_API_KEY"
+
+      - name: Upload to Firebase App Distribution
+        working-directory: app/android
+        run: bundle exec fastlane beta

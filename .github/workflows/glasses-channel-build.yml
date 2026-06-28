@@ -1,0 +1,101 @@
+name: Meta glasses — release-channel build
+
+# The M10 glasses release-channel build target. Produces the glasses-enabled
+# artifacts for both platforms — the build that vendors Meta's DAT SDK and flips
+# the channel on (Dart `--dart-define=GLASSES_ENABLED=true`, Gradle
+# `GLASSES_ENABLED`). Deliberately NOT run on every push: the default consumer
+# build stays mock-only and is gated by `ci.yml`. This runs only on a dedicated
+# `glasses-v*` tag or a manual dispatch, so it never collides with the regular
+# TestFlight / Firebase release pipelines on a plain `v*` tag.
+on:
+  push:
+    tags:
+      - "glasses-v*"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this glasses-channel build is being cut"
+        required: false
+        default: "manual glasses-channel build"
+
+env:
+  # Public RevenueCat key compiled into the build (not a secret; kept in secrets
+  # so it isn't hard-coded). Empty in forks/dev → premium stays the mock default.
+  REVENUECAT_API_KEY: ${{ secrets.REVENUECAT_API_KEY }}
+  # Flip the glasses release channel on for the native (Gradle) side. The Dart
+  # side is flipped by the --dart-define below; this is its native mirror.
+  GLASSES_ENABLED: "true"
+
+jobs:
+  android:
+    name: Android — glasses-channel APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # Gate before building: the resolver/build-config behaviour is covered by
+      # the Dart suite, so a broken channel switch fails here, not on a device.
+      - name: Run tests
+        run: flutter test
+
+      # The DAT SDK is proprietary and not committed; a CI runner has no libs/,
+      # so the build links nothing and the app degrades to MockSensorSource at
+      # runtime. A real glasses build drops the vendored .aar into app/libs/.
+      - name: Build glasses-channel APK
+        run: >
+          flutter build apk --release
+          --dart-define=GLASSES_ENABLED=true
+          --dart-define=REVENUECAT_API_KEY="$REVENUECAT_API_KEY"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gymbuddy-glasses-channel-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS — glasses-channel build
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      # --no-codesign: the signed TestFlight archive is ios-testflight.yml's job;
+      # this target only proves the glasses-channel iOS build compiles. A real
+      # glasses build vendors the DAT SDK framework into the Xcode project first.
+      - name: Build glasses-channel iOS app
+        run: >
+          flutter build ios --release --no-codesign
+          --dart-define=GLASSES_ENABLED=true
+          --dart-define=REVENUECAT_API_KEY="$REVENUECAT_API_KEY"

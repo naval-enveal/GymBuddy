@@ -1,0 +1,12 @@
+# App Store Connect / Apple Developer identity for the TestFlight pipeline.
+# Every value is read from the environment so nothing tied to the Apple account
+# is committed (secrets via env only — see CLAUDE.md). The bundle id defaults to
+# the project's identifier but stays overridable for white-label/staging builds.
+
+app_identifier(ENV["IOS_BUNDLE_ID"] || "com.gymbuddy.gymbuddy")
+
+# App Store Connect ("iTunes Connect") team — the team that owns the app record.
+itc_team_id(ENV["APP_STORE_CONNECT_TEAM_ID"]) if ENV["APP_STORE_CONNECT_TEAM_ID"]
+
+# Apple Developer Portal team — the team that owns the signing certificates.
+team_id(ENV["DEVELOPER_PORTAL_TEAM_ID"]) if ENV["DEVELOPER_PORTAL_TEAM_ID"]

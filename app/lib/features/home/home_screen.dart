@@ -62,34 +62,15 @@ class _DashboardError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
       key: const Key('vitals-error'),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 56,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'Couldn’t load your vitals',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrimaryButton(
-              key: const Key('vitals-error-retry'),
-              label: 'Try again',
-              icon: Icons.refresh,
-              onPressed: onRetry,
-            ),
-          ],
-        ),
+      child: StateMessage(
+        icon: Icons.error_outline,
+        title: 'Couldn’t load your vitals',
+        actionKey: const Key('vitals-error-retry'),
+        actionLabel: 'Try again',
+        actionIcon: Icons.refresh,
+        onAction: onRetry,
       ),
     );
   }
@@ -196,6 +177,9 @@ class _ReadinessHero extends StatelessWidget {
           progress: (readiness ?? 0) / 100,
           value: readiness?.toString() ?? '—',
           label: 'Readiness',
+          semanticLabel: readiness == null
+              ? 'Readiness not available yet'
+              : 'Readiness, $readiness out of 100',
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
@@ -299,7 +283,11 @@ class _VitalCard extends StatelessWidget {
       ),
       const SizedBox(height: AppSpacing.xs),
       if (series.length >= 2)
-        Sparkline(key: Key('vital-spark-$id'), values: series)
+        Sparkline(
+          key: Key('vital-spark-$id'),
+          values: series,
+          semanticLabel: '$label, 7-day trend',
+        )
       else
         Text('Not enough history yet', style: theme.textTheme.bodyMedium),
     ];

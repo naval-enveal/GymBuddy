@@ -19,6 +19,7 @@ class StatRing extends StatelessWidget {
     this.size = 96,
     this.strokeWidth = 8,
     this.color = AppColors.accent,
+    this.semanticLabel,
     super.key,
   });
 
@@ -40,11 +41,17 @@ class StatRing extends StatelessWidget {
   /// Arc color; defaults to the accent.
   final Color color;
 
+  /// When set, the visual subtree is hidden from screen readers and announced
+  /// as this single label instead of the split value/caption (e.g.
+  /// "Readiness, 82 out of 100"). When null the center value and label, if any,
+  /// are read as-is; a ring with no center text is then purely decorative.
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final clamped = progress.clamp(0.0, 1.0).toDouble();
-    return SizedBox(
+    final ring = SizedBox(
       width: size,
       height: size,
       child: CustomPaint(
@@ -75,6 +82,12 @@ class StatRing extends StatelessWidget {
           ),
         ),
       ),
+    );
+
+    if (semanticLabel == null) return ring;
+    return Semantics(
+      label: semanticLabel,
+      child: ExcludeSemantics(child: ring),
     );
   }
 }

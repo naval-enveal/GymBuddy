@@ -14,15 +14,244 @@
 ---
 
 ## Next up
-**M9 (AI layer + premium) is COMPLETE** on branch `m9-ai` (cut from `dev`) — all
-five tasks checked and pushed to `origin/m9-ai`: plan generation (1), coaching
-service (2), RevenueCat paywall + premium state (3), server-side premium gating
-(4), and app-never-holds-the-key verification + regression guard (5). **Next up:
-open PR `Milestone M9: ai` from `m9-ai` into `dev`** — do it manually (`gh` is
-unauthenticated here) and stop; a human reviews and merges, then the next run cuts
-a fresh branch from `dev` for **M10 — Polish, analytics, beta**, which is tagged
-`[HUMAN GATE]` and NOT yet `[GATE CLEARED]` (so the first M10 run will print
-`HUMAN_GATE: M10` and stop until a human clears the gate).
+**M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
+branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
+Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), 3
+(**Analytics + crash reporting**), 4 (**TestFlight pipeline**), 5
+(**Firebase App Distribution pipeline**), and 6 (**Meta glasses release-channel
+build target**) are **done** and pushed: a shared
+`StateMessage` widget backs the empty/error states; the glanceable design-system
+widgets (RepCounter/RestTimer/StatRing/Sparkline/MetricTile) expose single
+spoken `Semantics` labels with optional overrides, the unlabeled IconButtons
+gained tooltips, and the grayscale contrast ramp was confirmed at WCAG AA;
+product analytics + crash reporting now run behind a mock-first
+`AnalyticsService` seam (Firebase Analytics + Crashlytics impl wired at the
+composition root, mock default + generic crash handlers as the Firebase-free
+fallback) with call sites at auth (login/sign_up + setUserId/clear) and workout
+(started/completed); an iOS TestFlight pipeline (fastlane `beta` lane + a
+tag/dispatch-gated GitHub Actions workflow, App Store Connect API-key auth,
+`match` for signing, all credentials via env/secrets); and an Android Firebase
+App Distribution pipeline (fastlane `beta` lane uploading a signed release APK
+via the `firebase_app_distribution` plugin, service-account auth, env-driven
+release signing in `build.gradle.kts` with a debug fallback, a tag/dispatch-gated
+workflow, all credentials via env/secrets); and the glasses (DAT SDK) path is now
+a distinct, gated **release-channel build target** — the default consumer build
+ships mock-only (single-source flag `kGlassesChannelEnabled` /
+`--dart-define=GLASSES_ENABLED=true`, resolver short-circuits to the mock when
+off; Android `build.gradle.kts` links vendored SDK artifacts only for the target;
+gated `glasses-channel-build.yml` workflow; README documented).
+**Next up: M10 is complete — all six tasks checked.** Open PR `Milestone M10:
+beta` from `m10-polish` into `dev` and stop for human review (do not merge, do
+not cut the next branch).
+
+Meta glasses release-channel build-target design notes (task 6, done): the
+glasses (DAT SDK) hardware path is now opt-in per build, so the ordinary App
+Store / Play Store artifact ships **mock-only** — it neither bundles Meta's
+proprietary DAT SDK nor touches the native glasses channel. New
+`app/lib/sensors/glasses_build_config.dart` `kGlassesChannelEnabled`
+(`bool.fromEnvironment('GLASSES_ENABLED', defaultValue: false)`, a compile-time
+const) is the single source of truth. `resolveWorkoutSensorSource` gained a
+`glassesEnabled` param (defaulting to it): when off it returns `mockFactory()`
+immediately — the glasses source is never even constructed, so no native channel
+call and no SDK requirement; when on it runs the existing probe-and-fallback
+(graceful to mock if no SDK/pair). `main.dart`'s no-arg call picks up the default,
+so the default build is mock-only with no code change at the call site. Native
+mirror in `app/android/app/build.gradle.kts`: `glassesChannel` reads
+`-Pglasses=true` or `GLASSES_ENABLED` env and, only when true, links any vendored
+`.aar`/`.jar` from `app/android/app/libs/` (gitignored — the SDK is proprietary,
+never committed; `fileTree` is a no-op when empty, so CI/default builds link
+nothing and the reflective runtime detection in `DatSdkClient.kt` finds nothing →
+unavailable → mock). New gated workflow
+`.github/workflows/glasses-channel-build.yml` (`glasses-v*` tag / manual dispatch
+only — off ordinary pushes and off the plain `v*` TestFlight/Firebase pipelines)
+runs `flutter test` then builds the glasses-channel APK (ubuntu) + iOS app
+(`macos-14`, `--no-codesign`) with `--dart-define=GLASSES_ENABLED=true` +
+`GLASSES_ENABLED=true` env, uploading the APK artifact. README gained a "Meta
+glasses release channel" section. iOS native vendoring (framework into the Xcode
+project) is documented, not scripted — no SDK to vendor headless. 3 new tests
+(`glasses_build_config_test.dart`: default-off; `sensor_source_resolver_test.dart`:
+skips/never-builds glasses when disabled, enabled-with-no-native-handler →
+`MockSensorSource`; the three existing probe tests now pass `glassesEnabled: true`).
+`flutter analyze` clean, `flutter test` 353/353 green (+3). (The native
+glasses-channel link + a real DAT SDK build can't run headless — the Dart gate +
+the reflective-fallback posture are what's verified.)
+
+Firebase App Distribution pipeline design notes (task 5, done): the Android beta
+analogue of the iOS TestFlight pipeline, mirroring its shape. Lives in
+`app/android/fastlane/` + `.github/workflows/android-firebase-distribution.yml`,
+separate from `ci.yml` so it never runs on an ordinary push. Trigger: a `v*` tag
+push or a manual **Run workflow** dispatch only. **fastlane** (`Fastfile` `beta`
+lane): uploads the prebuilt signed release APK to Firebase App Distribution via
+the `firebase_app_distribution` plugin (`Pluginfile`), authenticating with a
+Google **service-account JSON** (`service_credentials_file`, Firebase App
+Distribution Admin role — no interactive login, so it runs unattended), targeting
+`FIREBASE_ANDROID_APP_ID` and `FIREBASE_DISTRIBUTION_GROUPS` (default
+`internal-testers`); the lane fails fast with a clear message if the APK is
+missing. `Appfile` reads the package name (`com.gymbuddy.gymbuddy`, overridable
+via `ANDROID_PACKAGE_NAME`); `Gemfile` pins fastlane `~> 2.222` and pulls in the
+plugin. **Release signing** (`app/android/app/build.gradle.kts`): replaced the
+debug-keys TODO with a real release `signingConfig` that reads the keystore from
+`key.properties` (local, gitignored) or `ANDROID_KEYSTORE_PATH`/`_PASSWORD`/
+`ANDROID_KEY_ALIAS`/`ANDROID_KEY_PASSWORD` env vars (CI), falling back to the
+debug keys when nothing is configured so local `flutter run --release` still
+works with no secrets. **Workflow** (`ubuntu-latest`): checkout → JDK 17
+(temurin) → Flutter (stable) → Ruby 3.2 w/ `bundler-cache` (`working-directory:
+app/android`) → `flutter pub get` → `flutter test` (gate before shipping) →
+decode the base64 keystore + service-account JSON into `$RUNNER_TEMP` and export
+their paths → `flutter build apk --release
+--dart-define=REVENUECAT_API_KEY=…` (the Gradle release signingConfig picks up
+the keystore env) → `bundle exec fastlane beta`. **Secrets via env only**
+(CLAUDE.md): every credential — `FIREBASE_ANDROID_APP_ID`,
+`FIREBASE_SERVICE_ACCOUNT_BASE64`, `FIREBASE_DISTRIBUTION_GROUPS`,
+`ANDROID_KEYSTORE_BASE64`/`_PASSWORD`/`ANDROID_KEY_ALIAS`/`_PASSWORD`, and the
+**public** `REVENUECAT_API_KEY` — comes from GitHub secrets; nothing signing- or
+account-related is committed. `.gitignore` gained the Android fastlane artifacts
+(`report.xml`, `Gemfile.lock`, `*.apk`, `*.aab`, decoded service-account JSON);
+required secrets + the one-time keystore/service-account bootstrap are documented
+in `app/android/fastlane/README.md` and linked from the root README. No app/
+server Dart/JS code changed (CI/release infra + Gradle signing), so the
+regression gate is the existing suite: `flutter analyze` clean, `flutter test`
+350/350 green (unchanged), both workflow YAMLs validated. (The signed APK build +
+Firebase upload can't run headless without an Android SDK/keystore/Firebase
+project — the fastlane+workflow+signing scaffolding gated on secrets is what's
+verified; a human completes the keystore/service-account bootstrap and sets the
+secrets.)
+
+TestFlight pipeline design notes (task 4, done): the iOS beta-delivery pipeline
+lives in `app/ios/fastlane/` + `.github/workflows/ios-testflight.yml`, separate
+from `ci.yml` so it never runs on an ordinary push (it needs a macOS runner and
+live Apple credentials). Trigger: a `v*` tag push or a manual **Run workflow**
+dispatch only. **fastlane** (`Fastfile` `beta` lane): authenticates with an **App
+Store Connect API key** (a base64'd `.p8` via `app_store_connect_api_key`,
+`is_key_content_base64: true`) — no Apple ID/2FA, so it runs unattended — fetches
+signing material **read-only** via `match` (`Matchfile`, storage `git`,
+`readonly` in CI so a build never mints/revokes certs), bumps the build number to
+`latest_testflight_build_number + 1` (rescued so the very-first upload still
+works), then `build_app` (Release, `app-store` export, `Runner.xcworkspace`/
+`Runner` scheme) → `upload_to_testflight` (`skip_waiting_for_build_processing`,
+internal only). `Appfile` reads bundle id (`com.gymbuddy.gymbuddy`, overridable
+via `IOS_BUNDLE_ID`) + both team ids from env; `Gemfile` pins fastlane `~>
+2.222`. **Workflow** (`macos-14`): checkout → Flutter (stable) → Ruby 3.2 w/
+`bundler-cache` (`working-directory: app/ios`) → `flutter pub get` → `flutter
+test` (gate before shipping) → `flutter build ios --release --no-codesign
+--dart-define=REVENUECAT_API_KEY=…` (compiles the Dart side so
+`Generated.xcconfig` carries the public RevenueCat key; the subsequent fastlane
+archive reuses these assets) → `bundle exec fastlane beta`. **Secrets via env
+only** (CLAUDE.md): every credential — `APP_STORE_CONNECT_API_KEY_ID`/
+`_ISSUER_ID`/`_KEY_CONTENT`, the two team ids, `MATCH_GIT_URL`/`MATCH_PASSWORD`/
+`MATCH_GIT_BASIC_AUTHORIZATION`, and the **public** `REVENUECAT_API_KEY` (kept in
+secrets so it isn't hard-coded, but not a secret like the server-only Claude key)
+— comes from GitHub secrets; nothing tied to the Apple account is committed.
+`.gitignore` gained the fastlane artifacts (`report.xml`, `Gemfile.lock`, `*.ipa`,
+`*.dSYM.zip`, …); required secrets + the one-time `fastlane match appstore`
+bootstrap are documented in `app/ios/fastlane/README.md` and linked from the root
+README. No app/server code changed (this is CI/release infra), so the regression
+gate is the existing suite: `flutter analyze` clean, `flutter test` 350/350 green
+(unchanged), workflow YAML validated. (The signed archive + TestFlight upload
+can't run headless without an Apple Developer account/macOS — the
+fastlane+workflow scaffolding gated on secrets is what's verified; a human
+completes the `match` bootstrap and sets the secrets.)
+
+Analytics design notes (task 3, done): product analytics + crash reporting live
+behind a mock-first `AnalyticsService` seam (`app/lib/core/analytics/`), the same
+rule as `WorkoutSensorSource`/`HealthPermissionService`/`PremiumService` —
+feature code never imports Firebase. `analytics_service.dart`: the
+`AnalyticsService` interface (`logEvent`/`setUserId`/`recordError`, **every
+method contracted never to throw** — telemetry is observation, not control flow),
+`AnalyticsEvents` (the centralized snake_case taxonomy so call sites + dashboards
+can't drift: `workout_started`/`workout_completed`/`sign_up`/`login`),
+`MockAnalyticsService` (the provider default — buffers events/errors/userId in
+memory so tests assert what the app reported, mirroring `MockSensorSource`),
+`analyticsServiceProvider`, and `installCrashHandlers(analytics)` which routes
+Flutter's two uncaught-error hooks (`FlutterError.onError` — prior handler still
+runs first so debug console dumps survive — and `PlatformDispatcher.onError`,
+returning `true` = handled) into `recordError(fatal: true)`.
+`firebase_analytics_service.dart`: `FirebaseAnalyticsService` over Firebase
+Analytics + Crashlytics; the static `configure()` calls `Firebase.initializeApp()`,
+points both error hooks at Crashlytics (`recordFlutterError` for native
+symbolication), and returns the ready service — or **null** when Firebase isn't
+configured/available (no `google-services.json`/`GoogleService-Info.plist`, or
+headless/dev), in which case the caller keeps the mock. Every method swallows
+SDK/transport failures (never-throw); `_coerceParameters` drops nulls + stringifies
+non-num values (Firebase only accepts String/num). **Composition root**
+(`main.dart`): `await FirebaseAnalyticsService.configure()` → on null, build a
+`MockAnalyticsService` and `installCrashHandlers` on it (Firebase's own
+`configure` already wired the hooks when present) → `analyticsServiceProvider`
+overridden with whichever service resulted. **Call sites:** `AuthController`
+`signIn`/`register` fire `login`/`sign_up` + `setUserId(session.user.id)` (the
+backend id, never PII/email; empty id skipped), `signOut` clears it
+(`setUserId(null)`); `WorkoutSessionController` logs `workout_started`
+(`{plan, exercises}`) after tracking begins and `workout_completed`
+(`{plan, sets, reps}` totals) at **both** completion transitions via a shared
+`_logCompleted()` — the last-set branch of `completeSet()` and the `_advance()`
+fallback are mutually exclusive, so exactly one event per finished workout. All
+events carry only coarse, non-identifying counts — no vitals, names, or secrets —
+and every analytics call is `unawaited` fire-and-forget (never blocks the auth or
+session path). No server changes (analytics + crash reporting are a client
+concern). 13 new tests: 7 `test/core/analytics/analytics_service_test.dart`
+(mock records events/userId/errors, provider default, `installCrashHandlers`
+routes both hooks to `recordError(fatal:true)` + preserves the prior
+FlutterError handler + returns handled, `configure` returns null headless), 3
+auth (`auth_controller_test.dart`: signIn→login+id, register→sign_up+id,
+signOut→clears id), 3 workout (`workout_session_controller_test.dart`:
+`workout_started` counts, `workout_completed` totals, exactly-one across the
+multi-exercise `_advance` path). `flutter analyze` clean, `flutter test` 350/350
+green (+13). (Firebase init can't run headless — the seam + mock + null-fallback
+gate is what's verified.)
+
+Accessibility design notes (task 2, done): the glanceable widgets rendered
+numbers as split visual fragments (RepCounter's "8" + " / 12" Texts, RestTimer's
+ring + mm:ss, StatRing's value + caption) or as an a11y-invisible CustomPaint
+(Sparkline) — a screen reader read them disjointed or skipped them entirely. Each
+now wraps its visual subtree in `Semantics(label:) + ExcludeSemantics` (Sparkline
+uses a plain `Semantics` since the painter exposes nothing to exclude), announcing
+one phrase and hiding the fragments, with an optional `semanticLabel` to override
+the default: RepCounter → "{reps} of {target} {label}"/"{reps} {label}" (label
+lowercased), RestTimer → "Rest, {m:ss} remaining", StatRing → the given label
+(null keeps the existing value/caption Texts readable, so a bare progress ring
+with no center text stays purely decorative — e.g. the home `_VitalCard` gauge
+whose value is in the card text), Sparkline → the given label (null = silent, the
+default), MetricTile → "{label}, {value} {unit}" (unit omitted when null). The
+`ExcludeSemantics` keeps the Text widgets in the *widget* tree, so every existing
+`find.text(...)` assertion (workout reps/timer, home values) is unchanged. Wired
+real labels where the widget needs caller context: home readiness ring
+("Readiness, 82 out of 100" / "Readiness not available yet" when null) and the
+per-metric sparklines ("<metric>, 7-day trend"); the workout RepCounter/RestTimer
+ride their sensible defaults. Touch targets: the interactive controls are Material
+`IconButton`s (≥48dp by default) and the full-width `PrimaryButton` (sized to the
+target by design) — no undersized custom hit areas — so the gap was missing
+*labels*, not size: added `tooltip`s (which also seed the a11y label) to the three
+bare IconButtons (paywall `Close`, onboarding `Back`, injury `Add injury`).
+Contrast audit: the dark-first grayscale ramp clears WCAG AA — textMuted (#9AA3AD)
+on surface (#15171B) ≈ 7:1, textPrimary (#F5F7FA) far higher, accent used for
+large/glanceable elements not body text. 8 new tests
+(`test/core/design/widgets_test.dart` `accessibility — semantic labels`: RepCounter
+target/no-target/override, RestTimer, StatRing label-hides-fragments, Sparkline,
+MetricTile with/without unit — all via `ensureSemantics` +
+`getSemantics(...).label`). `flutter analyze` clean, `flutter test` 337/337 green
+(+8).
+
+State-widget design notes (task 1, done): the empty/error states across features
+shared one copy-pasted layout (icon + title + optional supporting line + optional
+retry/CTA button). Extracted it into a single design-system widget,
+`app/lib/core/design/widgets/state_message.dart` `StateMessage` (exported from the
+`design.dart` barrel) — presentation only, a `Column(mainAxisSize.min)` with the
+56px `onSurfaceVariant` icon, `titleMedium` title, optional `bodyMedium`-muted
+message, and an optional `PrimaryButton` action (`actionLabel`/`actionIcon`/
+`onAction`/`actionKey`, asserted that label+action come together). It is unwrapped
+so callers place it in a `Center` for a full-screen state or drop it into a
+`ListView` under a `RefreshIndicator` for a pull-to-refresh empty state. Adopted
+in `_PlansEmpty`/`_PlansError` (plans), `_DashboardError` (home), and
+`_NoPlan`/`_StartError` (workout) — every existing state key (`plans-empty`,
+`plans-retry`, `vitals-error`, `vitals-error-retry`, `workout-empty`,
+`workout-error`, `workout-error-retry`) and visible copy is preserved on the
+caller's wrapper, so the feature widget tests are unchanged. Loading states were
+already uniform (a keyed `Center(child: CircularProgressIndicator())`) and left
+as-is; auth/onboarding carry their own inline error+`isLoading` affordances and
+need no change. 4 new tests (`test/core/design/widgets_test.dart` `StateMessage`
+group: icon+title with no message/action, supporting message rendered, action
+button fires `onAction`, the label/action assert). `flutter analyze` clean,
+`flutter test` 329/329 green (+4).
 
 Task 5 design notes (done): "the app never holds the Claude API key" — verified
 end to end and locked with a guard. The key is server-side only by construction —
@@ -895,18 +1124,108 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Premium gating enforced server-side
 - [x] App never holds the Claude API key
 
-### M10 — Polish, analytics, beta  [HUMAN GATE]  `[ ]`
-- [ ] Empty / error / loading states across features
-- [ ] Accessibility pass
-- [ ] Analytics + crash reporting
-- [ ] TestFlight pipeline
-- [ ] Firebase App Distribution pipeline
-- [ ] Meta glasses release-channel build target
+### M10 — Polish, analytics, beta  [GATE CLEARED]  `[ ]`
+- [x] Empty / error / loading states across features
+- [x] Accessibility pass
+- [x] Analytics + crash reporting
+- [x] TestFlight pipeline
+- [x] Firebase App Distribution pipeline
+- [x] Meta glasses release-channel build target
 
 ---
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · Meta glasses release-channel build target (M10 task 6).
+  Made the glasses (DAT SDK) path a distinct, gated build target so the default
+  consumer build ships mock-only and never bundles the proprietary SDK or touches
+  the native glasses channel. New `app/lib/sensors/glasses_build_config.dart`
+  `kGlassesChannelEnabled` (`bool.fromEnvironment('GLASSES_ENABLED')`, default
+  false) is the single source of truth; `resolveWorkoutSensorSource` gained a
+  `glassesEnabled` param (defaulting to it) that short-circuits straight to
+  `MockSensorSource` — never constructing/probing the glasses source — when off,
+  and probes-then-falls-back as before when on. `main.dart` picks up the default.
+  Android `build.gradle.kts` mirrors the flag natively (`-Pglasses=true` /
+  `GLASSES_ENABLED` env) and links any vendored DAT SDK artifacts from
+  `app/android/app/libs/` (gitignored, never committed) only for this target.
+  New gated workflow `.github/workflows/glasses-channel-build.yml` (`glasses-v*`
+  tag / manual dispatch, off ordinary pushes and the plain `v*` pipelines) builds
+  the glasses-channel APK + iOS app with `--dart-define=GLASSES_ENABLED=true`
+  after a `flutter test` gate. README documents the target. The SDK is detected
+  reflectively at runtime, so a glasses build with no SDK vendored degrades to
+  the mock. `flutter analyze` clean, `flutter test` 353/353 green (+3: build-config
+  default-off, resolver skips-when-disabled, resolver enabled-no-handler→mock).
+- 2026-06-28 · M10 · Firebase App Distribution pipeline (M10 task 5). Added the
+  Android beta-delivery analogue of TestFlight: `app/android/fastlane/` (`beta`
+  lane — `firebase_app_distribution` plugin, service-account auth, uploads a
+  prebuilt signed release APK; `Appfile`/`Pluginfile`/`Gemfile`) driven by
+  `.github/workflows/android-firebase-distribution.yml` (`ubuntu-latest`, gated
+  on `v*` tags + manual dispatch so it never runs on ordinary pushes; JDK 17 →
+  `flutter test` gate → decode keystore + service-account secrets → `flutter
+  build apk --release` with the public RevenueCat dart-define → `bundle exec
+  fastlane beta`). Wired a real env/key.properties-driven release `signingConfig`
+  in `app/android/app/build.gradle.kts` (debug-keys fallback so local
+  `flutter run --release` still works). Every credential comes from GitHub
+  secrets (secrets via env only); `.gitignore` gained the Android fastlane
+  artifacts and `app/android/fastlane/README.md` documents the required secrets +
+  one-time keystore/service-account bootstrap (linked from the root README). No
+  Dart/JS changed — `flutter analyze` clean, `flutter test` 350/350 green
+  (unchanged), both workflow YAMLs valid.
+- 2026-06-28 · M10 · TestFlight pipeline (M10 task 4). Added an iOS
+  beta-delivery pipeline: `app/ios/fastlane/` (`beta` lane — App Store Connect
+  API-key auth, `match` read-only signing, build-number bump, `build_app` →
+  `upload_to_testflight`; `Appfile`/`Matchfile`/`Gemfile`) driven by
+  `.github/workflows/ios-testflight.yml` (`macos-14`, gated on `v*` tags +
+  manual dispatch so it never runs on ordinary pushes; `flutter test` gate →
+  `flutter build ios --release` with the public RevenueCat dart-define →
+  `bundle exec fastlane beta`). Every credential comes from GitHub secrets
+  (secrets via env only); `.gitignore` gained the fastlane artifacts and
+  `app/ios/fastlane/README.md` documents the required secrets + one-time `match`
+  bootstrap (linked from the root README). No app/server code changed — `flutter
+  analyze` clean, `flutter test` 350/350 green (unchanged), workflow YAML valid.
+- 2026-06-28 · M10 · Analytics + crash reporting (M10 task 3). Added a
+  mock-first `AnalyticsService` seam (`app/lib/core/analytics/`) — feature code
+  never imports Firebase, same rule as the sensor/health/premium seams. The
+  interface (`logEvent`/`setUserId`/`recordError`, all never-throw), a
+  centralized `AnalyticsEvents` taxonomy, a buffering `MockAnalyticsService`
+  (provider default), and `installCrashHandlers` routing both Flutter
+  uncaught-error hooks into `recordError(fatal:true)`. `FirebaseAnalyticsService`
+  backs it with Firebase Analytics + Crashlytics; its `configure()` returns null
+  when Firebase is unavailable so dev/headless builds keep the mock. Wired at the
+  composition root and at auth (login/sign_up + setUserId/clear) and workout
+  (started/completed, one completed event per finish) call sites — coarse
+  non-identifying counts only, all fire-and-forget. No server changes. `flutter
+  analyze` clean, `flutter test` 350/350 (+13).
+- 2026-06-28 · M10 · Accessibility pass (M10 task 2). Made the glanceable
+  design-system widgets screen-reader-legible — they previously rendered numbers
+  as split visual fragments (RepCounter "8" + " / 12", RestTimer ring + mm:ss,
+  StatRing value + caption) or as an invisible CustomPaint (Sparkline), all of
+  which a screen reader reads disjointed or skips. Each now wraps its visual
+  subtree in `Semantics(label:) + ExcludeSemantics` (Sparkline: a plain
+  `Semantics` over the painter) exposing one spoken phrase, with an optional
+  `semanticLabel` override: RepCounter → "8 of 12 reps"/"5 reps", RestTimer →
+  "Rest, 1:05 remaining", StatRing → caller label (null = value/caption read
+  as-is, a bare ring stays decorative), Sparkline → caller label (null = silent),
+  MetricTile → "Resting HR, 58 bpm". Wired meaningful labels at the home
+  dashboard (readiness ring "Readiness, 82 out of 100", per-metric sparklines
+  "<metric>, 7-day trend") and added missing `tooltip`s to the three unlabeled
+  IconButtons (paywall close, onboarding back, injury add) — IconButtons already
+  meet the ≥48dp touch target via Material defaults, PrimaryButton is sized to it
+  by design. Contrast: the grayscale ramp clears WCAG AA — textMuted (#9AA3AD) on
+  surface (#15171B) is ~7:1, textPrimary far higher. 8 new widget tests
+  (`test/core/design/widgets_test.dart` `accessibility — semantic labels` group,
+  via `ensureSemantics` + `getSemantics(...).label`). `flutter analyze` clean,
+  `flutter test` 337/337 green (+8).
+- 2026-06-28 · M10 · Empty/error/loading states across features (M10 task 1).
+  Extracted the icon + title + optional message + optional retry/CTA layout that
+  plans, home, and workout each duplicated inline into one shared design-system
+  widget `StateMessage` (`app/lib/core/design/widgets/state_message.dart`, exported
+  from the `design.dart` barrel; presentation-only, placeable in a `Center` or a
+  scrollable `RefreshIndicator` list). Adopted it in `_PlansEmpty`/`_PlansError`,
+  `_DashboardError`, and `_NoPlan`/`_StartError`, preserving every state key and
+  visible string so the feature widget tests are untouched. Loading spinners were
+  already uniform and left as-is. 4 new `StateMessage` widget tests. `flutter
+  analyze` clean, `flutter test` 329/329 green (+4).
 - 2026-06-28 · M9 · App never holds the Claude API key (M9 task 5) — verified +
   guarded. Confirmed end to end: the key lives only server-side
   (`config.anthropic` ← `ANTHROPIC_API_KEY` env, behind the `claude.client`

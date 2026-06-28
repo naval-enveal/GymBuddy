@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:gymbuddy/core/analytics/analytics_service.dart';
+import 'package:gymbuddy/core/analytics/firebase_analytics_service.dart';
 import 'package:gymbuddy/core/design/design.dart';
 import 'package:gymbuddy/core/health/health_package_permission_service.dart';
 import 'package:gymbuddy/core/health/health_permission_service.dart';
@@ -35,10 +37,27 @@ Future<void> main() async {
   // to mocks so tests and hardware-free dev builds keep working untouched.
   WidgetsFlutterBinding.ensureInitialized();
 
+  // M10 analytics + crash reporting: try the Firebase-backed service. When
+  // Firebase is configured, `configure()` also routes Flutter's uncaught-error
+  // hooks straight into Crashlytics and returns a ready service. Otherwise — no
+  // Firebase project, or a dev/headless build — it returns null and we keep the
+  // [MockAnalyticsService] default, wiring the generic crash handlers onto it so
+  // uncaught errors are still observed. Telemetry never blocks startup.
+  final firebaseAnalytics = await FirebaseAnalyticsService.configure();
+  final AnalyticsService analytics = firebaseAnalytics ?? MockAnalyticsService();
+  if (firebaseAnalytics == null) {
+    installCrashHandlers(analytics);
+  }
+
   // M7 capability detection: probe the real glasses source once at the
   // composition root and override the (synchronous) sensor provider with
   // whatever it resolves to — the glasses when they're available, otherwise the
   // mock. The session controller reads `workoutSensorSourceProvider` unchanged.
+  //
+  // M10 glasses release channel: the resolver is gated by `kGlassesChannelEnabled`
+  // (`--dart-define=GLASSES_ENABLED=true`). The default consumer build keeps the
+  // channel off, so this returns the mock without ever touching the native
+  // glasses channel; only the glasses-channel build target opts into the probe.
   final sensorSource = await resolveWorkoutSensorSource();
 
   // M9 premium: when a RevenueCat public SDK key is provided, configure the SDK
@@ -53,6 +72,7 @@ Future<void> main() async {
   runApp(
     ProviderScope(
       overrides: [
+        analyticsServiceProvider.overrideWithValue(analytics),
         if (premiumService != null)
           premiumServiceProvider.overrideWithValue(premiumService),
         sessionExpiredProvider.overrideWith(

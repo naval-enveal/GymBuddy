@@ -25,3 +25,4 @@ export 'widgets/rep_counter.dart';
 export 'widgets/rest_timer.dart';
 export 'widgets/sparkline.dart';
 export 'widgets/stat_ring.dart';
+export 'widgets/state_message.dart';

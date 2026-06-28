@@ -34,6 +34,16 @@ class MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // The caption, value, and unit describe one metric, so announce them as a
+    // single phrase ("Resting HR, 58 bpm") rather than three split fragments.
+    final spokenLabel = unit == null ? '$label, $value' : '$label, $value $unit';
+    return Semantics(
+      label: spokenLabel,
+      child: ExcludeSemantics(child: _tile(theme)),
+    );
+  }
+
+  Widget _tile(ThemeData theme) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: const BoxDecoration(

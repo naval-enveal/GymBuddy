@@ -27,6 +27,7 @@ class PaywallScreen extends ConsumerWidget {
         leading: IconButton(
           key: const Key('paywall-close'),
           icon: const Icon(Icons.close),
+          tooltip: 'Close',
           onPressed: () => Navigator.of(context).maybePop(),
         ),
       ),

@@ -1,0 +1,10 @@
+# Pins the fastlane toolchain so local and CI runs use the same version.
+# Install with `bundle install`, then run lanes via `bundle exec fastlane <lane>`.
+source "https://rubygems.org"
+
+gem "fastlane", "~> 2.222"
+
+# Pull in the fastlane plugins (firebase_app_distribution) declared in the
+# Pluginfile, mirroring how `fastlane add_plugin` wires them.
+plugins_path = File.join(File.dirname(__FILE__), "fastlane", "Pluginfile")
+eval_gemfile(plugins_path) if File.exist?(plugins_path)

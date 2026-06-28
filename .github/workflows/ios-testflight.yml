@@ -1,0 +1,67 @@
+name: iOS — TestFlight
+
+# Beta delivery to TestFlight. Deliberately NOT run on every push: it needs a
+# macOS runner and live Apple credentials, so it triggers only on a release tag
+# (v1.2.3) or a manual dispatch. The regular `ci.yml` keeps gating every push.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this manual TestFlight build is being cut"
+        required: false
+        default: "manual beta build"
+
+jobs:
+  testflight:
+    name: Build + upload to TestFlight
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: app
+    env:
+      # App Store Connect API key (unattended auth — no Apple ID / 2FA).
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+      APP_STORE_CONNECT_TEAM_ID: ${{ secrets.APP_STORE_CONNECT_TEAM_ID }}
+      DEVELOPER_PORTAL_TEAM_ID: ${{ secrets.DEVELOPER_PORTAL_TEAM_ID }}
+      # fastlane match (read-only fetch of signing material).
+      MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+      # Public RevenueCat key compiled into the release build (not a secret, but
+      # kept in secrets so the key isn't hard-coded in the repo).
+      REVENUECAT_API_KEY: ${{ secrets.REVENUECAT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Set up Ruby (fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: app/ios
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      # Compile the Flutter/Dart side with the release dart-defines. This
+      # regenerates ios/Flutter/Generated.xcconfig (including DART_DEFINES), so
+      # the fastlane Xcode archive reuses these assets instead of a debug build.
+      - name: Build Flutter iOS (no codesign)
+        run: flutter build ios --release --no-codesign --dart-define=REVENUECAT_API_KEY="$REVENUECAT_API_KEY"
+
+      - name: Upload to TestFlight
+        working-directory: app/ios
+        run: bundle exec fastlane beta

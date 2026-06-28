@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/analytics/analytics_service.dart';
 import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/core/storage/token_store.dart';
 import 'package:gymbuddy/features/auth/auth_controller.dart';
@@ -20,10 +21,13 @@ Future<void> _settle() => Future<void>.delayed(Duration.zero);
 ProviderContainer _container(
   TokenStore store, {
   MockClientHandler? handler,
+  MockAnalyticsService? analytics,
 }) {
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(store),
+      if (analytics != null)
+        analyticsServiceProvider.overrideWithValue(analytics),
       if (handler != null)
         apiClientProvider.overrideWithValue(
           ApiClient(
@@ -135,5 +139,78 @@ void main() {
     expect(container.read(authControllerProvider), AuthStatus.unauthenticated);
     expect(await store.read(), isNull);
     expect(loggedOut, isTrue);
+  });
+
+  test('signIn logs the login event and identifies the user', () async {
+    final analytics = MockAnalyticsService();
+    final container = _container(
+      InMemoryTokenStore(),
+      analytics: analytics,
+      handler: (req) async => http.Response(
+        jsonEncode({
+          'user': {'id': 'u1', 'email': 'a@b.com'},
+          'accessToken': 'AT',
+          'refreshToken': 'RT',
+        }),
+        200,
+      ),
+    );
+    await _settle();
+
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(email: 'a@b.com', password: 'pw');
+
+    expect(analytics.userId, 'u1');
+    expect(
+      analytics.events.map((e) => e.name),
+      contains(AnalyticsEvents.login),
+    );
+  });
+
+  test('register logs the sign_up event and identifies the user', () async {
+    final analytics = MockAnalyticsService();
+    final container = _container(
+      InMemoryTokenStore(),
+      analytics: analytics,
+      handler: (req) async {
+        expect(req.url.path, '/auth/register');
+        return http.Response(
+          jsonEncode({
+            'user': {'id': 'new-user', 'email': 'a@b.com'},
+            'accessToken': 'AT',
+            'refreshToken': 'RT',
+          }),
+          201,
+        );
+      },
+    );
+    await _settle();
+
+    await container
+        .read(authControllerProvider.notifier)
+        .register(email: 'a@b.com', password: 'pw');
+
+    expect(analytics.userId, 'new-user');
+    expect(
+      analytics.events.map((e) => e.name),
+      contains(AnalyticsEvents.signUp),
+    );
+  });
+
+  test('signOut detaches the analytics user id', () async {
+    final analytics = MockAnalyticsService()..userId = 'u1';
+    final container = _container(
+      InMemoryTokenStore(
+        const AuthTokens(accessToken: 'AT', refreshToken: 'RT'),
+      ),
+      analytics: analytics,
+      handler: (req) async => http.Response('', 204),
+    );
+    await _settle();
+
+    await container.read(authControllerProvider.notifier).signOut();
+
+    expect(analytics.userId, isNull);
   });
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:gymbuddy/core/analytics/analytics_service.dart';
 import 'package:gymbuddy/core/storage/token_store.dart';
 import 'package:gymbuddy/features/auth/auth_api.dart';
 import 'package:gymbuddy/features/auth/auth_status.dart';
@@ -47,6 +48,7 @@ class AuthController extends Notifier<AuthStatus> {
           password: password,
         );
     await _persist(session);
+    _track(AnalyticsEvents.login, session.user.id);
   }
 
   /// Registers a new account, persists the issued tokens, and marks the session
@@ -62,6 +64,7 @@ class AuthController extends Notifier<AuthStatus> {
           displayName: displayName,
         );
     await _persist(session);
+    _track(AnalyticsEvents.signUp, session.user.id);
   }
 
   /// Clears the local session immediately, then best-effort revokes the refresh
@@ -71,6 +74,8 @@ class AuthController extends Notifier<AuthStatus> {
     final store = ref.read(tokenStoreProvider);
     final tokens = await store.read();
     state = AuthStatus.unauthenticated;
+    // Detach analytics + crash reports from the signed-out user. Never throws.
+    unawaited(ref.read(analyticsServiceProvider).setUserId(null));
     await store.clear();
     if (tokens != null) {
       try {
@@ -84,6 +89,18 @@ class AuthController extends Notifier<AuthStatus> {
   Future<void> _persist(AuthSession session) async {
     await ref.read(tokenStoreProvider).save(session.tokens);
     state = AuthStatus.authenticated;
+  }
+
+  /// Associates analytics + crash reports with the now-authenticated user and
+  /// records the auth [event]. Fire-and-forget observation — the
+  /// [AnalyticsService] contract is never-throw, so this can't break sign-in;
+  /// `userId` is the backend id (never PII), or skipped when absent.
+  void _track(String event, String userId) {
+    final analytics = ref.read(analyticsServiceProvider);
+    if (userId.isNotEmpty) {
+      unawaited(analytics.setUserId(userId));
+    }
+    unawaited(analytics.logEvent(event));
   }
 }
 

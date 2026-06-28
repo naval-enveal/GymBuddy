@@ -1,0 +1,3 @@
+# fastlane plugins for the Android pipeline. The Firebase App Distribution
+# action ships as a plugin, not in fastlane core.
+gem "fastlane-plugin-firebase_app_distribution"

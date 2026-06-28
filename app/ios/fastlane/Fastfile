@@ -1,0 +1,74 @@
+# GymBuddy — iOS TestFlight pipeline.
+#
+# `fastlane beta` builds a signed release IPA and uploads it to TestFlight.
+# Authentication uses an App Store Connect API key (a .p8) rather than an Apple
+# ID + password, so it runs unattended in CI with no 2FA prompt. Code-signing
+# material is fetched read-only via `match` (see Matchfile). Every credential
+# comes from the environment — nothing secret is committed (CLAUDE.md: secrets
+# via env only).
+#
+# The Flutter side is compiled by the CI workflow (`flutter build ios
+# --release`) *before* this lane runs, which regenerates ios/Flutter/
+# Generated.xcconfig — including the REVENUECAT_API_KEY dart-define — so the
+# Xcode archive that `build_app` produces reuses the up-to-date Flutter assets.
+
+default_platform(:ios)
+
+WORKSPACE = "Runner.xcworkspace".freeze
+SCHEME = "Runner".freeze
+
+platform :ios do
+  before_all do
+    # Create a temporary keychain and tune git/agent behaviour for CI runs.
+    setup_ci if ENV["CI"] == "true"
+  end
+
+  desc "Build a signed release IPA and upload it to TestFlight"
+  lane :beta do
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+      issuer_id: ENV.fetch("APP_STORE_CONNECT_API_ISSUER_ID"),
+      # Base64 of the .p8 file, so the multi-line key survives a CI secret.
+      key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_CONTENT"),
+      is_key_content_base64: true,
+      in_house: false,
+    )
+
+    # Fetch the distribution cert + App Store provisioning profile (read-only:
+    # CI never mints credentials). Requires MATCH_GIT_URL + MATCH_PASSWORD.
+    match(
+      type: "appstore",
+      readonly: true,
+      api_key: api_key,
+    )
+
+    # Set the build number to the next TestFlight number so re-runs never
+    # collide. Falls back to the existing project value if the lookup fails
+    # (e.g. the very first upload, when there is no prior build).
+    begin
+      latest = latest_testflight_build_number(api_key: api_key)
+      increment_build_number(build_number: latest + 1, xcodeproj: "Runner.xcodeproj")
+    rescue => e
+      UI.important("Skipping build-number bump (#{e.message}); using project value.")
+    end
+
+    build_app(
+      workspace: WORKSPACE,
+      scheme: SCHEME,
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build",
+      output_name: "GymBuddy.ipa",
+      # Don't let gym re-resolve signing — match already provisioned it.
+      xcargs: "-allowProvisioningUpdates",
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      # Hand the build to TestFlight processing and return — don't hold the CI
+      # runner for Apple's (slow, async) processing + review.
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+    )
+  end
+end
