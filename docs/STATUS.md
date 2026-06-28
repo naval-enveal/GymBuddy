@@ -14,14 +14,163 @@
 ---
 
 ## Next up
-**M8 is complete** on branch `m8-pose` (cut from `dev`). All five tasks are
-checked and pushed to `origin/m8-pose`. **ACTION NEEDED: open the PR
-`Milestone M8: pose` from `m8-pose` into `dev` manually** — the autonomous run
-could not open it because `gh` is not authenticated in this environment
-(`gh auth login` / no `GH_TOKEN`). Do not merge, do not cut the next branch.
-**After the merge, M9 (AI layer + premium) is next** — but it is tagged
-`[HUMAN GATE]` and not yet `[GATE CLEARED]`, so the next autonomous run must
-print `HUMAN_GATE: M9` and stop until a human clears the gate.
+**M9 (AI layer + premium) is COMPLETE** on branch `m9-ai` (cut from `dev`) — all
+five tasks checked and pushed to `origin/m9-ai`: plan generation (1), coaching
+service (2), RevenueCat paywall + premium state (3), server-side premium gating
+(4), and app-never-holds-the-key verification + regression guard (5). **Next up:
+open PR `Milestone M9: ai` from `m9-ai` into `dev`** — do it manually (`gh` is
+unauthenticated here) and stop; a human reviews and merges, then the next run cuts
+a fresh branch from `dev` for **M10 — Polish, analytics, beta**, which is tagged
+`[HUMAN GATE]` and NOT yet `[GATE CLEARED]` (so the first M10 run will print
+`HUMAN_GATE: M10` and stop until a human clears the gate).
+
+Task 5 design notes (done): "the app never holds the Claude API key" — verified
+end to end and locked with a guard. The key is server-side only by construction —
+`config.anthropic.apiKey` ← `ANTHROPIC_API_KEY` env, read in exactly one place
+(`config/env.js`) and used in exactly one place (the `claude.client` `getClient()`
+seam that lazily builds the `@anthropic-ai/sdk` client; both AI services go
+through it). Nothing under `app/` references the key or the SDK: the only matches
+for "Claude API key" in app sources are *prose* comments in `main.dart` /
+`revenuecat_premium_service.dart` explaining the contract; the app holds only the
+**public** RevenueCat key via `--dart-define=REVENUECAT_API_KEY` (not a secret).
+The app reaches AI exclusively through the premium-gated backend endpoints
+(`POST /plans/generate`, `POST /coaching/cues`) over the single `apiClient` seam.
+The server-only-key contract is documented in `.env.example`, `server/CLAUDE.md`,
+`app/CLAUDE.md`, and `config/env.js`. New regression guard
+`app/test/security/no_claude_key_test.dart` walks the app's shipping surface
+(`lib/`, `android/`, `ios/`, `macos`/`windows`/`linux`, `pubspec.yaml`; skips
+`build/`/`.dart_tool/`/`Pods/`/`.gradle/`/`ephemeral/` and `test/` itself) and
+fails if any of `ANTHROPIC_API_KEY`, an `sk-ant-` key prefix, or an Anthropic SDK
+dependency (`anthropic-ai`, `package:anthropic`) appears — it forbids key
+machinery, not prose, so the explanatory comments stay legal. A `files.length >
+10` sanity assertion prevents a vacuous pass from an empty/wrong-cwd walk;
+confirmed the guard fails on a planted token and passes once removed. No server
+changes were needed (the contract was already satisfied). `flutter analyze` clean,
+`flutter test` 325/325 green (+1).
+
+Premium-gating design notes (task 4, done): premium access is enforced
+server-side, never trusted from the client. New
+`server/src/middleware/premium.middleware.js` `requirePremium` — mounted
+**after** `requireAuth` (it reads `req.userId`), it loads the caller's
+`Subscription` (the M1 source of truth, created `free` at registration) and
+rejects with `402 Premium subscription required` (via `ApiError`, rendered by the
+central error handler) unless `Subscription.isPremiumActive()` returns true. That
+method already folds tier + status + expiry together, so a cancelled/expired row
+that still says `tier: 'premium'` is gated out, and a user with **no** row
+(defense in depth) is treated as free. Wired ahead of the validators on both AI
+endpoints (`plan.routes.js` `/generate`, `coaching.routes.js` `/cues`) so a free
+caller is rejected **before** any Claude call (and before request validation).
+The client's `PremiumService`/`isPremiumProvider` (task 3) is informational UX
+only and has zero authority here. The existing AI-behavior tests register a
+premium caller now (a shared `grantPremium(userId)` helper flips the default
+subscription via `Subscription.updateOne`) since these endpoints are premium; 6
+new gating tests assert the gate directly (free→402 with the injected Claude
+client proven **never invoked**, expired/cancelled premium→402, active
+premium→through). `npm run lint` clean, `npm test` 136/136.
+
+Premium client design notes (task 3, done): the client's view of entitlement,
+behind a mock-first seam — RevenueCat lives only in the real impl, never in
+feature code (same rule as `WorkoutSensorSource`/`HealthPermissionService`).
+`app/lib/features/premium/premium_service.dart`: `PremiumService` (abstract
+interface, every method **contracted never to throw** — store/network failure
+degrades to `free`/`empty`, a cancelled purchase returns the unchanged status),
+the RevenueCat-agnostic value types `PremiumStatus` (`free`/`premium`),
+`PremiumPackage`/`PremiumOffering` (value-equality projections of store
+packages, so the paywall never imports `purchases_flutter`), and
+`MockPremiumService` (the provider default — starts free, offers fixed packages,
+`purchase` flips to premium so the unlock flow runs end to end with no store,
+mirroring `MockSensorSource`). `revenuecat_premium_service.dart`:
+`RevenueCatPremiumService` over `purchases_flutter` (`^10.3.0`) — maps the
+`kPremiumEntitlementId` (`'premium'`) active entitlement to status, swallows
+every store/platform failure (incl. the user-cancelled purchase error code), and
+`configure({apiKey})` is best-effort. `premium_controller.dart`:
+`PremiumController extends AsyncNotifier<PremiumState>` (`build()` reads
+status+offering concurrently; `purchase`/`restore` fold the result back behind a
+single-flight `purchasing` flag that's **always** cleared even if the service
+throws; `refresh()` re-reads) + `isPremiumProvider` (a plain `bool`, `false`
+until premium is positively confirmed — the safe default; server enforces the
+real gate). `paywall_screen.dart`: renders the controller state (spinner /
+retryable error / upsell with per-package buy buttons + restore / `_PremiumActive`
+confirmation; empty offering → "purchases unavailable" + restore). `premium_gate.dart`:
+`PremiumGate` reveals its child only when premium else a locked CTA that
+`openPaywall`s (mirrors `VitalsPermissionGate`). Profile tab gained a
+`_PremiumSection` (status badge + upgrade entry). **Composition root** (`main.dart`):
+the RevenueCat **public** SDK key arrives via `--dart-define=REVENUECAT_API_KEY`
+(not a secret, unlike the server-only Claude key); when set, `configure` runs and
+`premiumServiceProvider` is overridden to the real service — otherwise the mock
+default keeps dev/test working with no store. Note: Riverpod 3.x exposes the
+nullable value as `AsyncValue.value` (not `valueOrNull`), and `Override` isn't a
+public type so override lists are built inline. 22 tests (`test/features/premium/`:
+8 service incl. value-equality + mock unlock + provider default, 6 controller incl.
+single-flight + always-clear-on-throw + refresh, 3 gate, 5 paywall widget incl.
+buy→confirmation + unavailable + error→retry). `flutter analyze` clean,
+`flutter test` 324/324 green (the RevenueCat native purchase flow can't run
+headless — the seam + mock + injected-fake gate is what's verified).
+
+Coaching design notes (task 2, done): real-time form coaching lives server-side
+behind the same `claude.client` seam as plan generation (the single key-holding
+entry point; inject a fake via `setClient` in tests). `services/coaching.service.js`
+`generateCues(userId, {exercise, formCues?, reps?, targetReps?, setNumber?})`
+takes the on-device pose/form snapshot from the request body (pose lives
+on-device, never stored), reads the caller's Profile (`experience` + `injuries`)
+server-side to personalize and keep the wearer safe — **optional**, not required
+(unlike plan generation, coaching still runs with no profile), builds a
+system+user prompt, and calls `messages.create` with `output_config.format`
+json_schema (`CUES_SCHEMA`) on `config.anthropic.model` (`claude-opus-4-8`,
+`max_tokens` 400 — cues are tiny). Output runs through `sanitizeCues`: trims each
+cue, drops blanks/non-strings, clamps cue length (160), preserves model order
+(= priority) and caps the count at 3 — so malformed-but-parseable output can
+never flood the speakers; a clean set returns `[]` (never throws). No text block
+/ invalid JSON is a `502`; unconfigured AI is a `503` (via `getClient`). New
+`POST /coaching/cues` (`requireAuth` → `validateCoachingCues` → controller)
+returns `200 { cues: [...] }` (ordered, most important first); the app plays them
+via `MetaGlassesSensorSource.playCue`. `coaching.validators.js` accepts a
+required `exercise`, an optional `formCues` array (`{severity?, message, joint?}`,
+severities good/minor/major mirroring the Dart `FormSeverity`, ≤20 entries), and
+optional `reps`/`targetReps`/`setNumber` (per-field numeric bounds), stripping
+everything else. Premium gating is **not** wired on this endpoint yet (M9 task 4).
+12 new tests (`tests/coaching.test.js`: auth required, cues for a faulty set,
+prompt carries exercise+faults+set-progress+profile + model/structured-output,
+works with no profile, empty list for a clean set, sanitation trims/drops/caps,
+no-cues-array → `[]`, 502 invalid-JSON, 503 unconfigured, 400 missing-exercise,
+400 bad-severity, 400 out-of-range-reps). `npm run lint` clean, `npm test`
+130/130. (The native Claude call can't run headless — the seam + injected-fake
+gate is what's verified.)
+
+AI plan-generation design notes (task 1, done): server-side only — the Claude
+API key lives in env (`config.anthropic`, never the client) and all Claude
+calls go through the new `claude.client.js` seam (`getClient()` lazily builds
+the `@anthropic-ai/sdk` client from the key and throws `503` when unset;
+`setClient()` injects a fake for tests so AI is exercised with no network).
+`services/ai-plan.service.js` `generatePlan(userId, {vitals})` reads the
+caller's Profile + the 10 most recent `WorkoutLog`s server-side, takes the
+client-supplied `vitals` snapshot (resting HR / HRV / sleep / steps / readiness
+— vitals live on-device in HealthKit/Health Connect, so they arrive in the
+request body, never stored), builds a system+user prompt, and calls
+`messages.create` with `output_config.format` json_schema (`PLAN_SCHEMA`) on
+`claude-opus-4-8`. The model output is parsed and run through
+`sanitizeGeneratedPlan` — clamps every numeric to its model bounds, drops
+nameless/empty entries, filters unknown equipment, and falls back to the
+profile's own goal/experience for out-of-vocabulary enums — so malformed-but-
+parseable output can never throw at the Mongoose layer; a plan with no usable
+workouts (or invalid JSON / no text block) is a `502`. `persistGeneratedPlan`
+then mirrors `adoptTemplate`: owned Workouts + an owned, non-template,
+`isActive` Plan with `sourceTemplate:null`, deactivating any prior active plan
+(one active plan per user, server-enforced). New `POST /plans/generate`
+(`requireAuth` → `validateGeneratePlan` → controller) returns `201 { plan }`
+with workouts populated; `ai-plan.validators.js` accepts only an optional
+`vitals` object (per-field numeric bounds, strips everything else).
+`error.middleware` now renders `ApiError` verbatim for **all** statuses
+(previously 4xx-only) so a deliberate `502`/`503` reaches the client instead of
+an opaque `500` — `ApiError` messages are curated/client-safe by construction.
+Premium gating is **not** wired on this endpoint yet (a later M9 task). Added
+`@anthropic-ai/sdk` dependency. 11 new tests (`tests/ai-plan.test.js`: auth
+required, profile-required, generate+persist owned/active, prior-active
+deactivated, prompt carries profile+history+vitals + model/structured-output,
+malformed-output sanitation, 502 no-workouts, 502 invalid-JSON, 503
+unconfigured, 400 bad-vitals ×2). `npm run lint` clean, `npm test` 118/118.
+(The native Claude call can't run headless — the seam + injected-fake gate is
+what's verified.)
 
 Task 5 design notes (done): `plan_detail_screen.dart`'s `_TrackingBadge` now
 takes a `PoseTracking` and is built from `poseTrackingFor(exercise.name)` (the
@@ -739,12 +888,12 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Initial mirror/POV-friendly exercise set
 - [x] UI marks exercises form-tracked vs rep-tracked-only
 
-### M9 — AI layer + premium  [HUMAN GATE]  `[ ]`
-- [ ] Server-side Claude API plan-generation service (profile + history + vitals)
-- [ ] Coaching service: sampled pose → short prioritized spoken cues
-- [ ] RevenueCat paywall + premium state
-- [ ] Premium gating enforced server-side
-- [ ] App never holds the Claude API key
+### M9 — AI layer + premium  [GATE CLEARED]  `[x]`
+- [x] Server-side Claude API plan-generation service (profile + history + vitals)
+- [x] Coaching service: sampled pose → short prioritized spoken cues
+- [x] RevenueCat paywall + premium state
+- [x] Premium gating enforced server-side
+- [x] App never holds the Claude API key
 
 ### M10 — Polish, analytics, beta  [HUMAN GATE]  `[ ]`
 - [ ] Empty / error / loading states across features
@@ -758,6 +907,87 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M9 · App never holds the Claude API key (M9 task 5) — verified +
+  guarded. Confirmed end to end: the key lives only server-side
+  (`config.anthropic` ← `ANTHROPIC_API_KEY` env, behind the `claude.client`
+  `getClient()` seam — the single key-holder for both AI endpoints), no Claude/
+  Anthropic key reference or SDK dependency exists anywhere under `app/` (only
+  descriptive prose comments), and the app reaches AI exclusively through the
+  premium-gated backend endpoints (`POST /plans/generate`, `POST /coaching/cues`)
+  over the one `apiClient` network seam — never holding the key. The server-only
+  contract is documented in `.env.example`, `server/CLAUDE.md`, `app/CLAUDE.md`,
+  and `config/env.js`. The app ships only the *public* RevenueCat SDK key
+  (`--dart-define=REVENUECAT_API_KEY`, not a secret). New regression guard
+  `app/test/security/no_claude_key_test.dart` scans the app's shipping sources
+  (`lib/`/`android/`/`ios/`/`pubspec.yaml`, excluding build output + `test/`) and
+  fails the build if `ANTHROPIC_API_KEY`, an `sk-ant-` key, or an Anthropic SDK
+  dependency ever appears — it forbids key machinery, not prose (so the existing
+  "the key stays server-side" comments stay legal), and has a file-count sanity
+  check so an empty walk can't pass vacuously (verified it catches a planted
+  token). `flutter analyze` clean, `flutter test` 325/325 green (+1). M9 complete
+  — all five tasks checked; PR `Milestone M9: ai` (m9-ai → dev) to be opened next.
+- 2026-06-28 · M9 · Premium gating enforced server-side (M9 task 4). New
+  `server/src/middleware/premium.middleware.js` `requirePremium` — mounted after
+  `requireAuth`, it loads the caller's `Subscription` (the server-side source of
+  truth, M1) and rejects with `402 Premium subscription required` unless
+  `isPremiumActive()` (tier + status + expiry together) holds; a missing row or a
+  cancelled/expired premium subscription is gated out, and the client's
+  `isPremiumProvider` is never trusted. Wired ahead of validation on both AI
+  endpoints (`POST /plans/generate`, `POST /coaching/cues`) so a free caller is
+  rejected before any Claude call. The existing AI-behavior tests now register a
+  premium caller (these endpoints are premium); 6 new gating tests
+  (`ai-plan.test.js` + `coaching.test.js`: free→402 with the Claude client never
+  invoked, expired/cancelled premium→402, active premium→through). `npm run lint`
+  clean, `npm test` 136/136.
+- 2026-06-28 · M9 · RevenueCat paywall + premium state (M9 task 3, client side).
+  New `app/lib/features/premium/`: a mock-first `PremiumService` seam
+  (`premium_service.dart` — `PremiumStatus`/`PremiumPackage`/`PremiumOffering`
+  value types + `MockPremiumService` default, every method contracted never to
+  throw), `RevenueCatPremiumService` over `purchases_flutter` `^10.3.0` (maps the
+  `'premium'` entitlement, swallows store/cancel failures, best-effort
+  `configure`), `PremiumController` (`AsyncNotifier<PremiumState>` — concurrent
+  status+offering read, single-flight `purchase`/`restore` that always clears the
+  `purchasing` flag, `refresh`) + `isPremiumProvider` (`false` until premium is
+  confirmed), `PaywallScreen` (spinner / retry / upsell with buy + restore /
+  active confirmation / purchases-unavailable), and `PremiumGate` (reveals child
+  when premium, else a locked CTA that opens the paywall — mirrors
+  `VitalsPermissionGate`). Profile tab gained a premium status section. The
+  composition root wires the real service only when the **public** RevenueCat SDK
+  key is supplied via `--dart-define=REVENUECAT_API_KEY` (not a secret; the app
+  still never holds the Claude key); otherwise the mock keeps dev/test working
+  with no store. Client entitlement is informational — the server enforces the
+  real gate (task 4). `flutter analyze` clean, `flutter test` 324/324 (22 new in
+  `test/features/premium/`).
+- 2026-06-28 · M9 · Server-side Claude API coaching service (M9 task 2). New
+  `server/src/services/coaching.service.js` `generateCues` — takes the on-device
+  pose/form snapshot from the body (`exercise`, `formCues`, `reps`/`targetReps`/
+  `setNumber`), reads the caller's Profile (`experience`+`injuries`) server-side
+  to personalize (optional — coaching runs without a profile), prompts
+  `claude-opus-4-8` through the `claude.client` seam with a json_schema
+  structured output (`max_tokens` 400), and runs the result through
+  `sanitizeCues` (trim, drop blanks/non-strings, clamp length 160, preserve
+  order = priority, cap at 3 — clean set → `[]`, never throws). No text / invalid
+  JSON → 502; unconfigured AI → 503. New `POST /coaching/cues` (`requireAuth` →
+  `validateCoachingCues`) → 200 `{ cues }` (the app plays them via
+  `MetaGlassesSensorSource.playCue`); validator requires `exercise`, accepts an
+  optional `formCues` array (good/minor/major severities, ≤20) + bounded
+  rep/set fields, strips the rest. Key stays server-side/env only. Premium
+  gating deferred to M9 task 4. `npm run lint` clean, `npm test` 130/130 (12 new
+  in `tests/coaching.test.js`).
+- 2026-06-28 · M9 · Server-side Claude API plan-generation service (M9 task 1).
+  New `server/src/services/claude.client.js` (the single key-holding seam over
+  `@anthropic-ai/sdk`; `getClient()` lazily builds from server-side env and
+  503s when unset; `setClient()` injects a fake for tests) and
+  `ai-plan.service.js` `generatePlan` — reads the caller's Profile + 10 recent
+  WorkoutLogs server-side, takes the client-supplied `vitals` snapshot, prompts
+  `claude-opus-4-8` with a json_schema structured output, sanitizes/clamps the
+  result (502 if unusable), and persists it as the caller's active owned plan
+  (deactivating any prior, `sourceTemplate:null`), mirroring `adoptTemplate`.
+  New `POST /plans/generate` (`requireAuth` → `validateGeneratePlan`) → 201
+  `{ plan }`; `error.middleware` now renders `ApiError` verbatim for all
+  statuses so 502/503 reach the client. Key is server-side/env only (never the
+  app). Premium gating deferred to a later M9 task. `@anthropic-ai/sdk` added.
+  `npm run lint` clean, `npm test` 118/118 (11 new in `tests/ai-plan.test.js`).
 - 2026-06-27 · M8 · UI marks exercises form-tracked vs rep-tracked-only vs
   untracked (M8 task 5, last M8 task). `plan_detail_screen.dart`'s `_TrackingBadge`
   now keys off the pose catalog's three-way `poseTrackingFor(exercise.name)`

@@ -49,8 +49,14 @@ function errorHandler(err, req, res, next) {
     return res.status(400).json({ error: { message: 'Invalid request' } });
   }
 
-  // Operational errors that already carry a client-safe 4xx status + message
-  // (ApiError from validation, AuthError from the auth service).
+  // Deliberately-thrown operational errors carry a curated, client-safe
+  // message and status, so they're rendered verbatim — including 5xx (e.g. a
+  // 502/503 from an upstream Claude API call), which the client should see
+  // rather than an opaque 500. ApiError is always safe; AuthError (and other
+  // 4xx carriers) are rendered for their client-facing 4xx range only.
+  if (err instanceof ApiError) {
+    return res.status(err.statusCode).json({ error: { message: err.message } });
+  }
   if (err && Number.isInteger(err.statusCode) && err.statusCode >= 400 && err.statusCode < 500) {
     return res.status(err.statusCode).json({ error: { message: err.message } });
   }

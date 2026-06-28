@@ -5,9 +5,12 @@ const {
   getTemplates,
   adoptPlan,
   getActivePlan,
+  generatePlan,
 } = require('../controllers/plan.controller');
 const { requireAuth } = require('../middleware/auth.middleware');
+const { requirePremium } = require('../middleware/premium.middleware');
 const { asyncHandler } = require('../middleware/error.middleware');
+const { validateGeneratePlan } = require('../validators/ai-plan.validators');
 
 const router = express.Router();
 
@@ -16,6 +19,18 @@ router.get('/templates', requireAuth, asyncHandler(getTemplates));
 
 // The caller's currently active plan (or null if none adopted).
 router.get('/active', requireAuth, asyncHandler(getActivePlan));
+
+// Generate a personalized plan via the Claude API (profile + history + vitals)
+// and adopt it as the caller's active plan. Premium-gated server-side from the
+// Subscription record (requirePremium) — a free user is rejected with 402
+// before any Claude call, regardless of what the client claims.
+router.post(
+  '/generate',
+  requireAuth,
+  requirePremium,
+  validateGeneratePlan,
+  asyncHandler(generatePlan)
+);
 
 // Adopt a template as the caller's active plan (deactivates any prior active
 // plan server-side — one active plan per user).

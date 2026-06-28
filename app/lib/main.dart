@@ -8,8 +8,18 @@ import 'package:gymbuddy/core/health/vitals_reader.dart';
 import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/auth/auth_controller.dart';
 import 'package:gymbuddy/features/auth/auth_gate.dart';
+import 'package:gymbuddy/features/premium/premium_service.dart';
+import 'package:gymbuddy/features/premium/revenuecat_premium_service.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
 import 'package:gymbuddy/sensors/sensor_source_resolver.dart';
+
+/// The RevenueCat **public** SDK key, injected at build time via
+/// `--dart-define=REVENUECAT_API_KEY=...`. This is not a secret (unlike the
+/// Claude API key, which never leaves the server). When unset — as in dev/test
+/// — the premium service stays the [MockPremiumService] default, so the app and
+/// paywall run end to end with no store configured.
+const String _revenueCatApiKey =
+    String.fromEnvironment('REVENUECAT_API_KEY');
 
 Future<void> main() async {
   // ProviderScope is the root of Riverpod's state graph; every provider read in
@@ -31,9 +41,20 @@ Future<void> main() async {
   // mock. The session controller reads `workoutSensorSourceProvider` unchanged.
   final sensorSource = await resolveWorkoutSensorSource();
 
+  // M9 premium: when a RevenueCat public SDK key is provided, configure the SDK
+  // and use the real entitlement service; otherwise leave the mock default so
+  // dev/test builds and the paywall keep working with no store attached.
+  PremiumService? premiumService;
+  if (_revenueCatApiKey.isNotEmpty) {
+    await RevenueCatPremiumService.configure(apiKey: _revenueCatApiKey);
+    premiumService = RevenueCatPremiumService();
+  }
+
   runApp(
     ProviderScope(
       overrides: [
+        if (premiumService != null)
+          premiumServiceProvider.overrideWithValue(premiumService),
         sessionExpiredProvider.overrideWith(
           (ref) =>
               () => ref.read(authControllerProvider.notifier).signOut(),
