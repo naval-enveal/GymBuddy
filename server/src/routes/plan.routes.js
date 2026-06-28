@@ -8,6 +8,7 @@ const {
   generatePlan,
 } = require('../controllers/plan.controller');
 const { requireAuth } = require('../middleware/auth.middleware');
+const { requirePremium } = require('../middleware/premium.middleware');
 const { asyncHandler } = require('../middleware/error.middleware');
 const { validateGeneratePlan } = require('../validators/ai-plan.validators');
 
@@ -20,11 +21,13 @@ router.get('/templates', requireAuth, asyncHandler(getTemplates));
 router.get('/active', requireAuth, asyncHandler(getActivePlan));
 
 // Generate a personalized plan via the Claude API (profile + history + vitals)
-// and adopt it as the caller's active plan. Premium gating for this endpoint
-// lands in a later M9 task (enforced server-side from the Subscription record).
+// and adopt it as the caller's active plan. Premium-gated server-side from the
+// Subscription record (requirePremium) — a free user is rejected with 402
+// before any Claude call, regardless of what the client claims.
 router.post(
   '/generate',
   requireAuth,
+  requirePremium,
   validateGeneratePlan,
   asyncHandler(generatePlan)
 );

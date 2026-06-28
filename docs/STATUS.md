@@ -15,20 +15,42 @@
 
 ## Next up
 **M9 (AI layer + premium) is in progress** on branch `m9-ai` (cut from `dev`).
-Tasks 1 (plan generation), 2 (coaching service), and 3 (RevenueCat paywall +
-premium state) are **done** and pushed to `origin/m9-ai`. **Next up: M9 task 4 —
-"Premium gating enforced server-side."** This wires the user's `Subscription`
-record (the server-side source of truth) into the currently-ungated
-`POST /plans/generate` and `POST /coaching/cues` endpoints so a free user is
-rejected (e.g. `402`/`403`) regardless of what the client claims — the client's
-`PremiumService`/`isPremiumProvider` is informational UX only (task 3). Reuse the
-existing `requireAuth` middleware pattern; add a premium-entitlement check
-(reconcile against the M1 `Subscription` model, `tier: 'premium'`). The final
-task 5 ("App never holds the Claude API key") is largely already satisfied — the
-key lives in `config.anthropic`/env behind the `claude.client` seam (tasks 1–2)
-and the app only holds the **public** RevenueCat SDK key (task 3) — but verify
-end to end. When all M9 tasks are checked, open PR `Milestone M9: ai` from
-`m9-ai` into `dev` (manually — `gh` is unauthenticated here) and stop.
+Tasks 1 (plan generation), 2 (coaching service), 3 (RevenueCat paywall + premium
+state), and 4 (premium gating enforced server-side) are **done** and pushed to
+`origin/m9-ai`. **Next up: M9 task 5 — "App never holds the Claude API key."**
+This is largely already satisfied by construction — the key lives in
+`config.anthropic`/env behind the server-only `claude.client` seam (tasks 1–2,
+`getClient()` builds the SDK client from env; the app never sees it) and the app
+only holds the **public** RevenueCat SDK key via `--dart-define=REVENUECAT_API_KEY`
+(task 3, not a secret). The task is to **verify** this end to end: confirm no
+`ANTHROPIC_API_KEY`/Claude key reference exists anywhere under `app/`, that the
+Flutter app reaches AI only through the gated server endpoints
+(`POST /plans/generate`, `POST /coaching/cues`) over `apiClient`, and that
+`.env.example`/docs make the server-only-key contract explicit. Add a guard
+(e.g. a test/lint check that fails if the key string appears in `app/`) if one
+doesn't already exist, so a regression is caught. When all M9 tasks are checked,
+open PR `Milestone M9: ai` from `m9-ai` into `dev` (manually — `gh` is
+unauthenticated here) and stop.
+
+Premium-gating design notes (task 4, done): premium access is enforced
+server-side, never trusted from the client. New
+`server/src/middleware/premium.middleware.js` `requirePremium` — mounted
+**after** `requireAuth` (it reads `req.userId`), it loads the caller's
+`Subscription` (the M1 source of truth, created `free` at registration) and
+rejects with `402 Premium subscription required` (via `ApiError`, rendered by the
+central error handler) unless `Subscription.isPremiumActive()` returns true. That
+method already folds tier + status + expiry together, so a cancelled/expired row
+that still says `tier: 'premium'` is gated out, and a user with **no** row
+(defense in depth) is treated as free. Wired ahead of the validators on both AI
+endpoints (`plan.routes.js` `/generate`, `coaching.routes.js` `/cues`) so a free
+caller is rejected **before** any Claude call (and before request validation).
+The client's `PremiumService`/`isPremiumProvider` (task 3) is informational UX
+only and has zero authority here. The existing AI-behavior tests register a
+premium caller now (a shared `grantPremium(userId)` helper flips the default
+subscription via `Subscription.updateOne`) since these endpoints are premium; 6
+new gating tests assert the gate directly (free→402 with the injected Claude
+client proven **never invoked**, expired/cancelled premium→402, active
+premium→through). `npm run lint` clean, `npm test` 136/136.
 
 Premium client design notes (task 3, done): the client's view of entitlement,
 behind a mock-first seam — RevenueCat lives only in the real impl, never in
@@ -854,7 +876,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Server-side Claude API plan-generation service (profile + history + vitals)
 - [x] Coaching service: sampled pose → short prioritized spoken cues
 - [x] RevenueCat paywall + premium state
-- [ ] Premium gating enforced server-side
+- [x] Premium gating enforced server-side
 - [ ] App never holds the Claude API key
 
 ### M10 — Polish, analytics, beta  [HUMAN GATE]  `[ ]`
@@ -869,6 +891,19 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M9 · Premium gating enforced server-side (M9 task 4). New
+  `server/src/middleware/premium.middleware.js` `requirePremium` — mounted after
+  `requireAuth`, it loads the caller's `Subscription` (the server-side source of
+  truth, M1) and rejects with `402 Premium subscription required` unless
+  `isPremiumActive()` (tier + status + expiry together) holds; a missing row or a
+  cancelled/expired premium subscription is gated out, and the client's
+  `isPremiumProvider` is never trusted. Wired ahead of validation on both AI
+  endpoints (`POST /plans/generate`, `POST /coaching/cues`) so a free caller is
+  rejected before any Claude call. The existing AI-behavior tests now register a
+  premium caller (these endpoints are premium); 6 new gating tests
+  (`ai-plan.test.js` + `coaching.test.js`: free→402 with the Claude client never
+  invoked, expired/cancelled premium→402, active premium→through). `npm run lint`
+  clean, `npm test` 136/136.
 - 2026-06-28 · M9 · RevenueCat paywall + premium state (M9 task 3, client side).
   New `app/lib/features/premium/`: a mock-first `PremiumService` seam
   (`premium_service.dart` — `PremiumStatus`/`PremiumPackage`/`PremiumOffering`

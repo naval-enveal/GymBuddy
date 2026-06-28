@@ -19,6 +19,7 @@ const {
   Workout,
   WorkoutLog,
   RefreshToken,
+  Subscription,
 } = require('../src/models');
 
 // Integration tests for POST /plans/generate (M9) — server-side Claude plan
@@ -99,15 +100,28 @@ describe('POST /plans/generate', () => {
       Workout.deleteMany({}),
       WorkoutLog.deleteMany({}),
       RefreshToken.deleteMany({}),
+      Subscription.deleteMany({}),
     ]);
   });
 
+  /** Flip the user's (free-by-default) subscription to active premium. */
+  async function grantPremium(userId) {
+    await Subscription.updateOne(
+      { user: userId },
+      { tier: 'premium', status: 'active', provider: 'revenuecat' }
+    );
+  }
+
+  // /plans/generate is premium-gated server-side, so the AI-behavior tests
+  // register a premium caller; the gate itself is covered separately below.
   async function registerAndToken(email = creds.email) {
     const res = await request(app)
       .post('/auth/register')
       .send({ ...creds, email });
     expect(res.status).toBe(201);
-    return { accessToken: res.body.accessToken, userId: res.body.user.id };
+    const userId = res.body.user.id;
+    await grantPremium(userId);
+    return { accessToken: res.body.accessToken, userId };
   }
 
   async function seedProfile(userId, overrides = {}) {
@@ -127,6 +141,64 @@ describe('POST /plans/generate', () => {
   test('requires authentication', async () => {
     const res = await request(app).post('/plans/generate').send({});
     expect(res.status).toBe(401);
+  });
+
+  test('rejects a free user server-side (402), before any Claude call', async () => {
+    // Register but do NOT grant premium — the default subscription is free.
+    const reg = await request(app)
+      .post('/auth/register')
+      .send({ ...creds });
+    expect(reg.status).toBe(201);
+    const { accessToken, user } = reg.body;
+    await seedProfile(user.id);
+    // A client claiming premium must not matter: the gate reads the server-side
+    // subscription, and the AI service is never reached.
+    let called = false;
+    claudeClient.setClient({
+      messages: { create: async () => { called = true; return { content: [] }; } },
+    });
+
+    const res = await request(app)
+      .post('/plans/generate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({});
+
+    expect(res.status).toBe(402);
+    expect(res.body.error.message).toMatch(/premium/i);
+    expect(called).toBe(false);
+  });
+
+  test('rejects an expired premium subscription (402)', async () => {
+    const reg = await request(app).post('/auth/register').send({ ...creds });
+    expect(reg.status).toBe(201);
+    const { accessToken, user } = reg.body;
+    await seedProfile(user.id);
+    // tier says premium but it has lapsed — isPremiumActive() must gate it out.
+    await Subscription.updateOne(
+      { user: user.id },
+      { tier: 'premium', status: 'expired' }
+    );
+    claudeClient.setClient(fakeClient(goodPlan()));
+
+    const res = await request(app)
+      .post('/plans/generate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({});
+
+    expect(res.status).toBe(402);
+  });
+
+  test('allows an active premium user through the gate', async () => {
+    const { accessToken, userId } = await registerAndToken();
+    await seedProfile(userId);
+    claudeClient.setClient(fakeClient(goodPlan()));
+
+    const res = await request(app)
+      .post('/plans/generate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({});
+
+    expect(res.status).toBe(201);
   });
 
   test('requires a profile (onboarding first)', async () => {

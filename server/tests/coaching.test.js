@@ -12,7 +12,7 @@ const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const createApp = require('../src/app');
 const claudeClient = require('../src/services/claude.client');
-const { User, Profile, RefreshToken } = require('../src/models');
+const { User, Profile, RefreshToken, Subscription } = require('../src/models');
 
 // Integration tests for POST /coaching/cues (M9) — server-side Claude form
 // coaching. The Anthropic client is injected via claude.client.setClient so no
@@ -53,15 +53,28 @@ describe('POST /coaching/cues', () => {
       User.deleteMany({}),
       Profile.deleteMany({}),
       RefreshToken.deleteMany({}),
+      Subscription.deleteMany({}),
     ]);
   });
 
+  /** Flip the user's (free-by-default) subscription to active premium. */
+  async function grantPremium(userId) {
+    await Subscription.updateOne(
+      { user: userId },
+      { tier: 'premium', status: 'active', provider: 'revenuecat' }
+    );
+  }
+
+  // /coaching/cues is premium-gated server-side, so the AI-behavior tests
+  // register a premium caller; the gate itself is covered separately below.
   async function registerAndToken(email = creds.email) {
     const res = await request(app)
       .post('/auth/register')
       .send({ ...creds, email });
     expect(res.status).toBe(201);
-    return { accessToken: res.body.accessToken, userId: res.body.user.id };
+    const userId = res.body.user.id;
+    await grantPremium(userId);
+    return { accessToken: res.body.accessToken, userId };
   }
 
   async function seedProfile(userId, overrides = {}) {
@@ -82,6 +95,56 @@ describe('POST /coaching/cues', () => {
       .post('/coaching/cues')
       .send({ exercise: 'Back Squat' });
     expect(res.status).toBe(401);
+  });
+
+  test('rejects a free user server-side (402), before any Claude call', async () => {
+    // Register but do NOT grant premium — the default subscription is free.
+    const reg = await request(app).post('/auth/register').send({ ...creds });
+    expect(reg.status).toBe(201);
+    const { accessToken } = reg.body;
+    let called = false;
+    claudeClient.setClient({
+      messages: { create: async () => { called = true; return { content: [] }; } },
+    });
+
+    const res = await request(app)
+      .post('/coaching/cues')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ exercise: 'Back Squat' });
+
+    expect(res.status).toBe(402);
+    expect(res.body.error.message).toMatch(/premium/i);
+    expect(called).toBe(false);
+  });
+
+  test('rejects a cancelled premium subscription (402)', async () => {
+    const reg = await request(app).post('/auth/register').send({ ...creds });
+    expect(reg.status).toBe(201);
+    const { accessToken, user } = reg.body;
+    await Subscription.updateOne(
+      { user: user.id },
+      { tier: 'premium', status: 'cancelled' }
+    );
+    claudeClient.setClient(fakeClient({ cues: ['Chest up.'] }));
+
+    const res = await request(app)
+      .post('/coaching/cues')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ exercise: 'Back Squat' });
+
+    expect(res.status).toBe(402);
+  });
+
+  test('allows an active premium user through the gate', async () => {
+    const { accessToken } = await registerAndToken();
+    claudeClient.setClient(fakeClient({ cues: ['Chest up.'] }));
+
+    const res = await request(app)
+      .post('/coaching/cues')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ exercise: 'Back Squat' });
+
+    expect(res.status).toBe(200);
   });
 
   test('returns prioritized spoken cues for a faulty set', async () => {
