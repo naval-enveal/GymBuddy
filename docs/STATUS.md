@@ -19,9 +19,9 @@ checked and pushed to `origin/m8-pose`. **ACTION NEEDED: open the PR
 `Milestone M8: pose` from `m8-pose` into `dev` manually** — the autonomous run
 could not open it because `gh` is not authenticated in this environment
 (`gh auth login` / no `GH_TOKEN`). Do not merge, do not cut the next branch.
-**After the merge, M9 (AI layer + premium) is next** — but it is tagged
-`[HUMAN GATE]` and not yet `[GATE CLEARED]`, so the next autonomous run must
-print `HUMAN_GATE: M9` and stop until a human clears the gate.
+**After the merge, M9 (AI layer + premium) is next** — the gate has been
+cleared (`[GATE CLEARED]`). Cut branch `m9-ai` from `dev` after the M8 merge
+and begin the first unchecked M9 task.
 
 Task 5 design notes (done): `plan_detail_screen.dart`'s `_TrackingBadge` now
 takes a `PoseTracking` and is built from `poseTrackingFor(exercise.name)` (the
@@ -739,7 +739,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Initial mirror/POV-friendly exercise set
 - [x] UI marks exercises form-tracked vs rep-tracked-only
 
-### M9 — AI layer + premium  [HUMAN GATE]  `[ ]`
+### M9 — AI layer + premium  [GATE CLEARED]  `[ ]`
 - [ ] Server-side Claude API plan-generation service (profile + history + vitals)
 - [ ] Coaching service: sampled pose → short prioritized spoken cues
 - [ ] RevenueCat paywall + premium state
