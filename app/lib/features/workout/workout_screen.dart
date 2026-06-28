@@ -165,33 +165,12 @@ class _NoPlan extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      key: const Key('workout-empty'),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.fitness_center_outlined,
-              size: 56,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'No active plan yet',
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Adopt a plan from the Plans tab to start a guided workout.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: AppColors.textMuted),
-            ),
-          ],
-        ),
+    return const Center(
+      key: Key('workout-empty'),
+      child: StateMessage(
+        icon: Icons.fitness_center_outlined,
+        title: 'No active plan yet',
+        message: 'Adopt a plan from the Plans tab to start a guided workout.',
       ),
     );
   }
@@ -205,33 +184,15 @@ class _StartError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
       key: const Key('workout-error'),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 56,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'Couldn’t load your plan',
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrimaryButton(
-              key: const Key('workout-error-retry'),
-              label: 'Try again',
-              icon: Icons.refresh,
-              onPressed: onRetry,
-            ),
-          ],
-        ),
+      child: StateMessage(
+        icon: Icons.error_outline,
+        title: 'Couldn’t load your plan',
+        actionKey: const Key('workout-error-retry'),
+        actionLabel: 'Try again',
+        actionIcon: Icons.refresh,
+        onAction: onRetry,
       ),
     );
   }

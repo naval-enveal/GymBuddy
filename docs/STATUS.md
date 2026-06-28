@@ -14,15 +14,38 @@
 ---
 
 ## Next up
-**M9 (AI layer + premium) is COMPLETE** on branch `m9-ai` (cut from `dev`) — all
-five tasks checked and pushed to `origin/m9-ai`: plan generation (1), coaching
-service (2), RevenueCat paywall + premium state (3), server-side premium gating
-(4), and app-never-holds-the-key verification + regression guard (5). **Next up:
-open PR `Milestone M9: ai` from `m9-ai` into `dev`** — do it manually (`gh` is
-unauthenticated here) and stop; a human reviews and merges, then the next run cuts
-a fresh branch from `dev` for **M10 — Polish, analytics, beta**, which is tagged
-`[HUMAN GATE]` and NOT yet `[GATE CLEARED]` (so the first M10 run will print
-`HUMAN_GATE: M10` and stop until a human clears the gate).
+**M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
+branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
+Task 1 (**Empty / error / loading states across features**) is **done** and
+pushed: a shared `StateMessage` design-system widget now backs the empty/error
+states that plans, home, and workout previously duplicated inline. **Next up:
+task 2 — Accessibility pass** (semantics labels, touch-target/contrast audit, large
+glanceable numerals already in the design system). After that: analytics + crash
+reporting, TestFlight pipeline, Firebase App Distribution pipeline, and the Meta
+glasses release-channel build target. When all six M10 tasks are checked, open PR
+`Milestone M10: beta` from `m10-polish` into `dev` and stop for human review.
+
+State-widget design notes (task 1, done): the empty/error states across features
+shared one copy-pasted layout (icon + title + optional supporting line + optional
+retry/CTA button). Extracted it into a single design-system widget,
+`app/lib/core/design/widgets/state_message.dart` `StateMessage` (exported from the
+`design.dart` barrel) — presentation only, a `Column(mainAxisSize.min)` with the
+56px `onSurfaceVariant` icon, `titleMedium` title, optional `bodyMedium`-muted
+message, and an optional `PrimaryButton` action (`actionLabel`/`actionIcon`/
+`onAction`/`actionKey`, asserted that label+action come together). It is unwrapped
+so callers place it in a `Center` for a full-screen state or drop it into a
+`ListView` under a `RefreshIndicator` for a pull-to-refresh empty state. Adopted
+in `_PlansEmpty`/`_PlansError` (plans), `_DashboardError` (home), and
+`_NoPlan`/`_StartError` (workout) — every existing state key (`plans-empty`,
+`plans-retry`, `vitals-error`, `vitals-error-retry`, `workout-empty`,
+`workout-error`, `workout-error-retry`) and visible copy is preserved on the
+caller's wrapper, so the feature widget tests are unchanged. Loading states were
+already uniform (a keyed `Center(child: CircularProgressIndicator())`) and left
+as-is; auth/onboarding carry their own inline error+`isLoading` affordances and
+need no change. 4 new tests (`test/core/design/widgets_test.dart` `StateMessage`
+group: icon+title with no message/action, supporting message rendered, action
+button fires `onAction`, the label/action assert). `flutter analyze` clean,
+`flutter test` 329/329 green (+4).
 
 Task 5 design notes (done): "the app never holds the Claude API key" — verified
 end to end and locked with a guard. The key is server-side only by construction —
@@ -896,7 +919,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] App never holds the Claude API key
 
 ### M10 — Polish, analytics, beta  [GATE CLEARED]  `[ ]`
-- [ ] Empty / error / loading states across features
+- [x] Empty / error / loading states across features
 - [ ] Accessibility pass
 - [ ] Analytics + crash reporting
 - [ ] TestFlight pipeline
@@ -907,6 +930,16 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · Empty/error/loading states across features (M10 task 1).
+  Extracted the icon + title + optional message + optional retry/CTA layout that
+  plans, home, and workout each duplicated inline into one shared design-system
+  widget `StateMessage` (`app/lib/core/design/widgets/state_message.dart`, exported
+  from the `design.dart` barrel; presentation-only, placeable in a `Center` or a
+  scrollable `RefreshIndicator` list). Adopted it in `_PlansEmpty`/`_PlansError`,
+  `_DashboardError`, and `_NoPlan`/`_StartError`, preserving every state key and
+  visible string so the feature widget tests are untouched. Loading spinners were
+  already uniform and left as-is. 4 new `StateMessage` widget tests. `flutter
+  analyze` clean, `flutter test` 329/329 green (+4).
 - 2026-06-28 · M9 · App never holds the Claude API key (M9 task 5) — verified +
   guarded. Confirmed end to end: the key lives only server-side
   (`config.anthropic` ← `ANTHROPIC_API_KEY` env, behind the `claude.client`

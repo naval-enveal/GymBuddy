@@ -191,4 +191,71 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('StateMessage', () {
+    testWidgets('renders the icon and title, and omits the message/action '
+        'when not given', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          const StateMessage(
+            icon: Icons.list_alt_outlined,
+            title: 'Nothing here yet',
+          ),
+        ),
+      );
+
+      expect(find.text('Nothing here yet'), findsOneWidget);
+      expect(find.byIcon(Icons.list_alt_outlined), findsOneWidget);
+      // No supporting line and no action button were supplied.
+      expect(find.byType(PrimaryButton), findsNothing);
+    });
+
+    testWidgets('renders the supporting message when given', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          const StateMessage(
+            icon: Icons.cloud_off_outlined,
+            title: "Couldn't load",
+            message: 'Check your connection.',
+          ),
+        ),
+      );
+
+      expect(find.text("Couldn't load"), findsOneWidget);
+      expect(find.text('Check your connection.'), findsOneWidget);
+    });
+
+    testWidgets('renders the action button and fires onAction when tapped',
+        (tester) async {
+      var taps = 0;
+      await tester.pumpWidget(
+        _host(
+          StateMessage(
+            icon: Icons.error_outline,
+            title: 'Something broke',
+            actionKey: const Key('state-retry'),
+            actionLabel: 'Try again',
+            actionIcon: Icons.refresh,
+            onAction: () => taps++,
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('state-retry')), findsOneWidget);
+      await tester.tap(find.text('Try again'));
+      expect(taps, 1);
+    });
+
+    testWidgets('asserts label and action are provided together',
+        (tester) async {
+      expect(
+        () => StateMessage(
+          icon: Icons.error_outline,
+          title: 'x',
+          actionLabel: 'Try again',
+        ),
+        throwsAssertionError,
+      );
+    });
+  });
 }

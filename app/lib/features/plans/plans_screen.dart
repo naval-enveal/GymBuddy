@@ -192,31 +192,16 @@ class _PlansEmpty extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     return RefreshIndicator(
       onRefresh: () => ref.read(plansControllerProvider.notifier).refresh(),
       child: ListView(
         key: const Key('plans-empty'),
         children: [
           SizedBox(height: MediaQuery.sizeOf(context).height * 0.3),
-          Icon(
-            Icons.list_alt_outlined,
-            size: 56,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            'No plans available yet',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Pull to refresh once your library is ready.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+          const StateMessage(
+            icon: Icons.list_alt_outlined,
+            title: 'No plans available yet',
+            message: 'Pull to refresh once your library is ready.',
           ),
         ],
       ),
@@ -232,41 +217,15 @@ class _PlansError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.cloud_off_outlined,
-              size: 56,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              "Couldn't load plans",
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Check your connection and try again.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrimaryButton(
-              key: const Key('plans-retry'),
-              label: 'Try again',
-              icon: Icons.refresh,
-              onPressed: onRetry,
-            ),
-          ],
-        ),
+      child: StateMessage(
+        icon: Icons.cloud_off_outlined,
+        title: "Couldn't load plans",
+        message: 'Check your connection and try again.',
+        actionKey: const Key('plans-retry'),
+        actionLabel: 'Try again',
+        actionIcon: Icons.refresh,
+        onAction: onRetry,
       ),
     );
   }
