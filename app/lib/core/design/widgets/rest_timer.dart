@@ -12,12 +12,17 @@ import 'package:gymbuddy/core/design/widgets/stat_ring.dart';
 /// at the start, empty at zero); both the ring and the numerals turn
 /// [AppColors.warning] once the remaining time drops to [warningThreshold] so a
 /// lifter glancing over knows the set is about to start.
+///
+/// The ring is purely visual, so the subtree is excluded from semantics and
+/// announced as a single label ("Rest, 1:05 remaining"). Pass [semanticLabel]
+/// to override.
 class RestTimer extends StatelessWidget {
   const RestTimer({
     required this.remaining,
     required this.total,
     this.size = 200,
     this.warningThreshold = const Duration(seconds: 10),
+    this.semanticLabel,
     super.key,
   });
 
@@ -33,6 +38,9 @@ class RestTimer extends StatelessWidget {
   /// At or below this remaining time, the timer switches to the warning color.
   final Duration warningThreshold;
 
+  /// Overrides the spoken label. Defaults to "Rest, {m:ss} remaining".
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
     // Guard against a zero/negative total so the fraction stays well-defined.
@@ -42,23 +50,28 @@ class RestTimer extends StatelessWidget {
     final isWarning = remaining <= warningThreshold;
     final color = isWarning ? AppColors.warning : AppColors.accent;
 
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          StatRing(
-            progress: fraction,
-            size: size,
-            strokeWidth: 12,
-            color: color,
+    return Semantics(
+      label: semanticLabel ?? 'Rest, ${_format(remaining)} remaining',
+      child: ExcludeSemantics(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              StatRing(
+                progress: fraction,
+                size: size,
+                strokeWidth: 12,
+                color: color,
+              ),
+              Text(
+                _format(remaining),
+                style: AppTypography.numericLarge.copyWith(color: color),
+              ),
+            ],
           ),
-          Text(
-            _format(remaining),
-            style: AppTypography.numericLarge.copyWith(color: color),
-          ),
-        ],
+        ),
       ),
     );
   }

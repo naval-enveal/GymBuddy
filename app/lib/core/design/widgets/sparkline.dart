@@ -17,6 +17,7 @@ class Sparkline extends StatelessWidget {
     this.color = AppColors.accent,
     this.height = 32,
     this.strokeWidth = 2,
+    this.semanticLabel,
     super.key,
   });
 
@@ -32,9 +33,14 @@ class Sparkline extends StatelessWidget {
   /// Line thickness.
   final double strokeWidth;
 
+  /// A spoken description of the trend (e.g. "Resting HR, 7-day trend"). The
+  /// painted line is invisible to screen readers, so without this the chart is
+  /// silent — supply it wherever the trend carries meaning.
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    final chart = SizedBox(
       height: height,
       width: double.infinity,
       child: CustomPaint(
@@ -45,6 +51,8 @@ class Sparkline extends StatelessWidget {
         ),
       ),
     );
+    if (semanticLabel == null) return chart;
+    return Semantics(label: semanticLabel, child: chart);
   }
 }
 

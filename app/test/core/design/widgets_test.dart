@@ -258,4 +258,119 @@ void main() {
       );
     });
   });
+
+  // The glanceable widgets render numbers as split visual fragments (or as an
+  // invisible CustomPaint), which a screen reader either reads disjointed or
+  // skips entirely. These assert each one exposes a single, meaningful spoken
+  // label instead.
+  group('accessibility — semantic labels', () {
+    testWidgets('RepCounter announces reps and target as one phrase',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(const RepCounter(reps: 8, target: 12)));
+
+      expect(tester.getSemantics(find.byType(RepCounter)).label,
+          '8 of 12 reps');
+      // The split numerals are excluded so they don't read as fragments.
+      expect(find.text('8'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('RepCounter drops the target when none is given',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(const RepCounter(reps: 5)));
+
+      expect(tester.getSemantics(find.byType(RepCounter)).label, '5 reps');
+      handle.dispose();
+    });
+
+    testWidgets('RepCounter honors an explicit semanticLabel', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(const RepCounter(reps: 5, semanticLabel: 'Five reps done')),
+      );
+
+      expect(tester.getSemantics(find.byType(RepCounter)).label,
+          'Five reps done');
+      handle.dispose();
+    });
+
+    testWidgets('RestTimer announces the remaining time', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(
+          const RestTimer(
+            remaining: Duration(seconds: 65),
+            total: Duration(seconds: 90),
+          ),
+        ),
+      );
+
+      expect(tester.getSemantics(find.byType(RestTimer)).label,
+          'Rest, 1:05 remaining');
+      handle.dispose();
+    });
+
+    testWidgets('StatRing announces its semanticLabel and hides the fragments',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(
+          const StatRing(
+            progress: 0.82,
+            value: '82',
+            label: 'Readiness',
+            semanticLabel: 'Readiness, 82 out of 100',
+          ),
+        ),
+      );
+
+      expect(tester.getSemantics(find.byType(StatRing)).label,
+          'Readiness, 82 out of 100');
+      handle.dispose();
+    });
+
+    testWidgets('Sparkline exposes a spoken label for the painted trend',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(
+          const Sparkline(
+            values: [1, 4, 2, 8, 5],
+            semanticLabel: 'Resting HR, 7-day trend',
+          ),
+        ),
+      );
+
+      expect(tester.getSemantics(find.byType(Sparkline)).label,
+          'Resting HR, 7-day trend');
+      handle.dispose();
+    });
+
+    testWidgets('MetricTile announces label, value, and unit as one phrase',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(
+          const MetricTile(label: 'Resting HR', value: '58', unit: 'bpm'),
+        ),
+      );
+
+      expect(tester.getSemantics(find.byType(MetricTile)).label,
+          'Resting HR, 58 bpm');
+      handle.dispose();
+    });
+
+    testWidgets('MetricTile omits the unit from its label when none is given',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(const MetricTile(label: 'Steps', value: '8,420')),
+      );
+
+      expect(tester.getSemantics(find.byType(MetricTile)).label, 'Steps, 8,420');
+      handle.dispose();
+    });
+  });
 }

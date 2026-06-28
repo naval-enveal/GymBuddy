@@ -56,6 +56,7 @@ class OnboardingScreen extends ConsumerWidget {
             : IconButton(
                 key: const Key('onboarding-back'),
                 icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back',
                 onPressed: controller.back,
               ),
         title: Text('Step ${state.stepNumber} of ${state.stepCount}'),
@@ -470,6 +471,7 @@ class _InjuriesStepState extends State<_InjuriesStep> {
             IconButton.filled(
               key: const Key('injury-add'),
               icon: const Icon(Icons.add),
+              tooltip: 'Add injury',
               onPressed: _add,
             ),
           ],

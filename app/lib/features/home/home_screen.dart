@@ -177,6 +177,9 @@ class _ReadinessHero extends StatelessWidget {
           progress: (readiness ?? 0) / 100,
           value: readiness?.toString() ?? '—',
           label: 'Readiness',
+          semanticLabel: readiness == null
+              ? 'Readiness not available yet'
+              : 'Readiness, $readiness out of 100',
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
@@ -280,7 +283,11 @@ class _VitalCard extends StatelessWidget {
       ),
       const SizedBox(height: AppSpacing.xs),
       if (series.length >= 2)
-        Sparkline(key: Key('vital-spark-$id'), values: series)
+        Sparkline(
+          key: Key('vital-spark-$id'),
+          values: series,
+          semanticLabel: '$label, 7-day trend',
+        )
       else
         Text('Not enough history yet', style: theme.textTheme.bodyMedium),
     ];

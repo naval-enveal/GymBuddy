@@ -16,14 +16,47 @@
 ## Next up
 **M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
 branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
-Task 1 (**Empty / error / loading states across features**) is **done** and
-pushed: a shared `StateMessage` design-system widget now backs the empty/error
-states that plans, home, and workout previously duplicated inline. **Next up:
-task 2 — Accessibility pass** (semantics labels, touch-target/contrast audit, large
-glanceable numerals already in the design system). After that: analytics + crash
-reporting, TestFlight pipeline, Firebase App Distribution pipeline, and the Meta
+Tasks 1 (**Empty / error / loading states**) and 2 (**Accessibility pass**) are
+**done** and pushed: a shared `StateMessage` widget backs the empty/error states,
+and the glanceable design-system widgets (RepCounter/RestTimer/StatRing/Sparkline/
+MetricTile) now expose single spoken `Semantics` labels with optional overrides,
+the unlabeled IconButtons gained tooltips, and the grayscale contrast ramp was
+confirmed at WCAG AA. **Next up: task 3 — Analytics + crash reporting.** After
+that: TestFlight pipeline, Firebase App Distribution pipeline, and the Meta
 glasses release-channel build target. When all six M10 tasks are checked, open PR
 `Milestone M10: beta` from `m10-polish` into `dev` and stop for human review.
+
+Accessibility design notes (task 2, done): the glanceable widgets rendered
+numbers as split visual fragments (RepCounter's "8" + " / 12" Texts, RestTimer's
+ring + mm:ss, StatRing's value + caption) or as an a11y-invisible CustomPaint
+(Sparkline) — a screen reader read them disjointed or skipped them entirely. Each
+now wraps its visual subtree in `Semantics(label:) + ExcludeSemantics` (Sparkline
+uses a plain `Semantics` since the painter exposes nothing to exclude), announcing
+one phrase and hiding the fragments, with an optional `semanticLabel` to override
+the default: RepCounter → "{reps} of {target} {label}"/"{reps} {label}" (label
+lowercased), RestTimer → "Rest, {m:ss} remaining", StatRing → the given label
+(null keeps the existing value/caption Texts readable, so a bare progress ring
+with no center text stays purely decorative — e.g. the home `_VitalCard` gauge
+whose value is in the card text), Sparkline → the given label (null = silent, the
+default), MetricTile → "{label}, {value} {unit}" (unit omitted when null). The
+`ExcludeSemantics` keeps the Text widgets in the *widget* tree, so every existing
+`find.text(...)` assertion (workout reps/timer, home values) is unchanged. Wired
+real labels where the widget needs caller context: home readiness ring
+("Readiness, 82 out of 100" / "Readiness not available yet" when null) and the
+per-metric sparklines ("<metric>, 7-day trend"); the workout RepCounter/RestTimer
+ride their sensible defaults. Touch targets: the interactive controls are Material
+`IconButton`s (≥48dp by default) and the full-width `PrimaryButton` (sized to the
+target by design) — no undersized custom hit areas — so the gap was missing
+*labels*, not size: added `tooltip`s (which also seed the a11y label) to the three
+bare IconButtons (paywall `Close`, onboarding `Back`, injury `Add injury`).
+Contrast audit: the dark-first grayscale ramp clears WCAG AA — textMuted (#9AA3AD)
+on surface (#15171B) ≈ 7:1, textPrimary (#F5F7FA) far higher, accent used for
+large/glanceable elements not body text. 8 new tests
+(`test/core/design/widgets_test.dart` `accessibility — semantic labels`: RepCounter
+target/no-target/override, RestTimer, StatRing label-hides-fragments, Sparkline,
+MetricTile with/without unit — all via `ensureSemantics` +
+`getSemantics(...).label`). `flutter analyze` clean, `flutter test` 337/337 green
+(+8).
 
 State-widget design notes (task 1, done): the empty/error states across features
 shared one copy-pasted layout (icon + title + optional supporting line + optional
@@ -920,7 +953,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M10 — Polish, analytics, beta  [GATE CLEARED]  `[ ]`
 - [x] Empty / error / loading states across features
-- [ ] Accessibility pass
+- [x] Accessibility pass
 - [ ] Analytics + crash reporting
 - [ ] TestFlight pipeline
 - [ ] Firebase App Distribution pipeline
@@ -930,6 +963,26 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · Accessibility pass (M10 task 2). Made the glanceable
+  design-system widgets screen-reader-legible — they previously rendered numbers
+  as split visual fragments (RepCounter "8" + " / 12", RestTimer ring + mm:ss,
+  StatRing value + caption) or as an invisible CustomPaint (Sparkline), all of
+  which a screen reader reads disjointed or skips. Each now wraps its visual
+  subtree in `Semantics(label:) + ExcludeSemantics` (Sparkline: a plain
+  `Semantics` over the painter) exposing one spoken phrase, with an optional
+  `semanticLabel` override: RepCounter → "8 of 12 reps"/"5 reps", RestTimer →
+  "Rest, 1:05 remaining", StatRing → caller label (null = value/caption read
+  as-is, a bare ring stays decorative), Sparkline → caller label (null = silent),
+  MetricTile → "Resting HR, 58 bpm". Wired meaningful labels at the home
+  dashboard (readiness ring "Readiness, 82 out of 100", per-metric sparklines
+  "<metric>, 7-day trend") and added missing `tooltip`s to the three unlabeled
+  IconButtons (paywall close, onboarding back, injury add) — IconButtons already
+  meet the ≥48dp touch target via Material defaults, PrimaryButton is sized to it
+  by design. Contrast: the grayscale ramp clears WCAG AA — textMuted (#9AA3AD) on
+  surface (#15171B) is ~7:1, textPrimary far higher. 8 new widget tests
+  (`test/core/design/widgets_test.dart` `accessibility — semantic labels` group,
+  via `ensureSemantics` + `getSemantics(...).label`). `flutter analyze` clean,
+  `flutter test` 337/337 green (+8).
 - 2026-06-28 · M10 · Empty/error/loading states across features (M10 task 1).
   Extracted the icon + title + optional message + optional retry/CTA layout that
   plans, home, and workout each duplicated inline into one shared design-system

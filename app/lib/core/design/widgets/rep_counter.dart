@@ -11,11 +11,17 @@ import 'package:gymbuddy/core/design/tokens/app_typography.dart';
 /// set at a glance. Purely presentational: it renders whatever count the
 /// session provider feeds it and counts nothing itself (rep detection lives in
 /// the sensor/session layer, M6+).
+///
+/// The split numeral + caption read as disconnected fragments to a screen
+/// reader, so the visual subtree is excluded from semantics and replaced with a
+/// single spoken label ("8 of 12 reps" / "8 reps"). Pass [semanticLabel] to
+/// override the default phrasing.
 class RepCounter extends StatelessWidget {
   const RepCounter({
     required this.reps,
     this.target,
     this.label = 'REPS',
+    this.semanticLabel,
     super.key,
   });
 
@@ -28,30 +34,44 @@ class RepCounter extends StatelessWidget {
   /// Caption above the numeral.
   final String label;
 
+  /// Overrides the spoken label. Defaults to "{reps} of {target} {label}" (or
+  /// "{reps} {label}" with no target), with [label] lowercased.
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: theme.textTheme.labelSmall),
-        const SizedBox(height: AppSpacing.xs),
-        Row(
+    final spokenUnit = label.toLowerCase();
+    final effectiveLabel = semanticLabel ??
+        (target != null
+            ? '$reps of $target $spokenUnit'
+            : '$reps $spokenUnit');
+    return Semantics(
+      label: effectiveLabel,
+      child: ExcludeSemantics(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
           children: [
-            Text('$reps', style: AppTypography.numericDisplay),
-            if (target != null)
-              Text(
-                ' / $target',
-                style: AppTypography.numericLarge.copyWith(
-                  color: AppColors.textMuted,
-                ),
-              ),
+            Text(label, style: theme.textTheme.labelSmall),
+            const SizedBox(height: AppSpacing.xs),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text('$reps', style: AppTypography.numericDisplay),
+                if (target != null)
+                  Text(
+                    ' / $target',
+                    style: AppTypography.numericLarge.copyWith(
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
-      ],
+      ),
     );
   }
 }
