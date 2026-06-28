@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:gymbuddy/core/analytics/analytics_service.dart';
 import 'package:gymbuddy/features/workout/session_models.dart';
 import 'package:gymbuddy/features/workout/workout_log_api.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
@@ -34,6 +35,8 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
 
   WorkoutSensorSource get _source => ref.read(workoutSensorSourceProvider);
 
+  AnalyticsService get _analytics => ref.read(analyticsServiceProvider);
+
   /// Begins [plan] from its first exercise/set. No-op for an empty plan or
   /// while a session is already active (resume that one instead); a finished or
   /// idle session can be (re)started.
@@ -57,6 +60,18 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
       completedSets: const <CompletedSet>[],
     );
     await _source.startTracking(plan.exercises.first.exercise);
+
+    // Coarse, non-identifying product event — no vitals, names, or PII, just a
+    // count of what was started. Fire-and-forget (the service never throws).
+    unawaited(
+      _analytics.logEvent(
+        AnalyticsEvents.workoutStarted,
+        parameters: <String, Object?>{
+          'plan': plan.name,
+          'exercises': plan.exercises.length,
+        },
+      ),
+    );
   }
 
   /// Ends the current set: records it, then either rests before the next set or
@@ -100,6 +115,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
         clearFormCue: true,
       );
       await _source.stopTracking();
+      _logCompleted();
       unawaited(_syncLog());
     }
   }
@@ -198,6 +214,7 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
 
     if (nextExercise >= state.plan.exercises.length) {
       state = state.copyWith(status: SessionStatus.completed, restRemaining: 0);
+      _logCompleted();
       unawaited(_syncLog());
       return;
     }
@@ -212,6 +229,26 @@ class WorkoutSessionController extends Notifier<WorkoutSessionState> {
       clearFormCue: true,
     );
     await _source.startTracking(state.plan.exercises[nextExercise].exercise);
+  }
+
+  /// Records the completed-workout product event from the final session state —
+  /// coarse counts only (plan name + set/rep totals), no PII. Called at both
+  /// completion transitions (last-set [completeSet] and the [_advance] fallback,
+  /// mutually exclusive, so exactly one event per finished workout).
+  /// Fire-and-forget; the [AnalyticsService] contract is never-throw.
+  void _logCompleted() {
+    final sets = state.completedSets;
+    final totalReps = sets.fold<int>(0, (sum, set) => sum + set.reps);
+    unawaited(
+      _analytics.logEvent(
+        AnalyticsEvents.workoutCompleted,
+        parameters: <String, Object?>{
+          'plan': state.plan.name,
+          'sets': sets.length,
+          'reps': totalReps,
+        },
+      ),
+    );
   }
 
   /// Persists the finished workout's summary to the backend. Best-effort: a

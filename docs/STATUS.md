@@ -16,15 +16,67 @@
 ## Next up
 **M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
 branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
-Tasks 1 (**Empty / error / loading states**) and 2 (**Accessibility pass**) are
-**done** and pushed: a shared `StateMessage` widget backs the empty/error states,
-and the glanceable design-system widgets (RepCounter/RestTimer/StatRing/Sparkline/
-MetricTile) now expose single spoken `Semantics` labels with optional overrides,
-the unlabeled IconButtons gained tooltips, and the grayscale contrast ramp was
-confirmed at WCAG AA. **Next up: task 3 — Analytics + crash reporting.** After
-that: TestFlight pipeline, Firebase App Distribution pipeline, and the Meta
-glasses release-channel build target. When all six M10 tasks are checked, open PR
-`Milestone M10: beta` from `m10-polish` into `dev` and stop for human review.
+Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), and 3
+(**Analytics + crash reporting**) are **done** and pushed: a shared
+`StateMessage` widget backs the empty/error states; the glanceable design-system
+widgets (RepCounter/RestTimer/StatRing/Sparkline/MetricTile) expose single spoken
+`Semantics` labels with optional overrides, the unlabeled IconButtons gained
+tooltips, and the grayscale contrast ramp was confirmed at WCAG AA; and product
+analytics + crash reporting now run behind a mock-first `AnalyticsService` seam
+(Firebase Analytics + Crashlytics impl wired at the composition root, mock
+default + generic crash handlers as the Firebase-free fallback) with call sites
+at auth (login/sign_up + setUserId/clear) and workout (started/completed).
+**Next up: task 4 — TestFlight pipeline.** After that: Firebase App Distribution
+pipeline, and the Meta glasses release-channel build target. When all six M10
+tasks are checked, open PR `Milestone M10: beta` from `m10-polish` into `dev` and
+stop for human review.
+
+Analytics design notes (task 3, done): product analytics + crash reporting live
+behind a mock-first `AnalyticsService` seam (`app/lib/core/analytics/`), the same
+rule as `WorkoutSensorSource`/`HealthPermissionService`/`PremiumService` —
+feature code never imports Firebase. `analytics_service.dart`: the
+`AnalyticsService` interface (`logEvent`/`setUserId`/`recordError`, **every
+method contracted never to throw** — telemetry is observation, not control flow),
+`AnalyticsEvents` (the centralized snake_case taxonomy so call sites + dashboards
+can't drift: `workout_started`/`workout_completed`/`sign_up`/`login`),
+`MockAnalyticsService` (the provider default — buffers events/errors/userId in
+memory so tests assert what the app reported, mirroring `MockSensorSource`),
+`analyticsServiceProvider`, and `installCrashHandlers(analytics)` which routes
+Flutter's two uncaught-error hooks (`FlutterError.onError` — prior handler still
+runs first so debug console dumps survive — and `PlatformDispatcher.onError`,
+returning `true` = handled) into `recordError(fatal: true)`.
+`firebase_analytics_service.dart`: `FirebaseAnalyticsService` over Firebase
+Analytics + Crashlytics; the static `configure()` calls `Firebase.initializeApp()`,
+points both error hooks at Crashlytics (`recordFlutterError` for native
+symbolication), and returns the ready service — or **null** when Firebase isn't
+configured/available (no `google-services.json`/`GoogleService-Info.plist`, or
+headless/dev), in which case the caller keeps the mock. Every method swallows
+SDK/transport failures (never-throw); `_coerceParameters` drops nulls + stringifies
+non-num values (Firebase only accepts String/num). **Composition root**
+(`main.dart`): `await FirebaseAnalyticsService.configure()` → on null, build a
+`MockAnalyticsService` and `installCrashHandlers` on it (Firebase's own
+`configure` already wired the hooks when present) → `analyticsServiceProvider`
+overridden with whichever service resulted. **Call sites:** `AuthController`
+`signIn`/`register` fire `login`/`sign_up` + `setUserId(session.user.id)` (the
+backend id, never PII/email; empty id skipped), `signOut` clears it
+(`setUserId(null)`); `WorkoutSessionController` logs `workout_started`
+(`{plan, exercises}`) after tracking begins and `workout_completed`
+(`{plan, sets, reps}` totals) at **both** completion transitions via a shared
+`_logCompleted()` — the last-set branch of `completeSet()` and the `_advance()`
+fallback are mutually exclusive, so exactly one event per finished workout. All
+events carry only coarse, non-identifying counts — no vitals, names, or secrets —
+and every analytics call is `unawaited` fire-and-forget (never blocks the auth or
+session path). No server changes (analytics + crash reporting are a client
+concern). 13 new tests: 7 `test/core/analytics/analytics_service_test.dart`
+(mock records events/userId/errors, provider default, `installCrashHandlers`
+routes both hooks to `recordError(fatal:true)` + preserves the prior
+FlutterError handler + returns handled, `configure` returns null headless), 3
+auth (`auth_controller_test.dart`: signIn→login+id, register→sign_up+id,
+signOut→clears id), 3 workout (`workout_session_controller_test.dart`:
+`workout_started` counts, `workout_completed` totals, exactly-one across the
+multi-exercise `_advance` path). `flutter analyze` clean, `flutter test` 350/350
+green (+13). (Firebase init can't run headless — the seam + mock + null-fallback
+gate is what's verified.)
 
 Accessibility design notes (task 2, done): the glanceable widgets rendered
 numbers as split visual fragments (RepCounter's "8" + " / 12" Texts, RestTimer's
@@ -954,7 +1006,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M10 — Polish, analytics, beta  [GATE CLEARED]  `[ ]`
 - [x] Empty / error / loading states across features
 - [x] Accessibility pass
-- [ ] Analytics + crash reporting
+- [x] Analytics + crash reporting
 - [ ] TestFlight pipeline
 - [ ] Firebase App Distribution pipeline
 - [ ] Meta glasses release-channel build target
@@ -963,6 +1015,19 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · Analytics + crash reporting (M10 task 3). Added a
+  mock-first `AnalyticsService` seam (`app/lib/core/analytics/`) — feature code
+  never imports Firebase, same rule as the sensor/health/premium seams. The
+  interface (`logEvent`/`setUserId`/`recordError`, all never-throw), a
+  centralized `AnalyticsEvents` taxonomy, a buffering `MockAnalyticsService`
+  (provider default), and `installCrashHandlers` routing both Flutter
+  uncaught-error hooks into `recordError(fatal:true)`. `FirebaseAnalyticsService`
+  backs it with Firebase Analytics + Crashlytics; its `configure()` returns null
+  when Firebase is unavailable so dev/headless builds keep the mock. Wired at the
+  composition root and at auth (login/sign_up + setUserId/clear) and workout
+  (started/completed, one completed event per finish) call sites — coarse
+  non-identifying counts only, all fire-and-forget. No server changes. `flutter
+  analyze` clean, `flutter test` 350/350 (+13).
 - 2026-06-28 · M10 · Accessibility pass (M10 task 2). Made the glanceable
   design-system widgets screen-reader-legible — they previously rendered numbers
   as split visual fragments (RepCounter "8" + " / 12", RestTimer ring + mm:ss,

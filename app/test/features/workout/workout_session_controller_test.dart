@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/analytics/analytics_service.dart';
 import 'package:gymbuddy/core/network/api_client.dart';
 import 'package:gymbuddy/features/workout/session_models.dart';
 import 'package:gymbuddy/features/workout/workout_log_api.dart';
@@ -39,12 +40,17 @@ void main() {
   /// A container whose sensor source is a deterministic, manually-driven mock.
   /// The WorkoutLog sync is stubbed so no real network call fires on completion;
   /// pass a [_RecordingLogApi] to assert what gets synced.
-  (ProviderContainer, MockSensorSource) makeSession({WorkoutLogApi? logApi}) {
+  (ProviderContainer, MockSensorSource) makeSession({
+    WorkoutLogApi? logApi,
+    MockAnalyticsService? analytics,
+  }) {
     final mock = MockSensorSource(autoSimulate: false, clock: () => fixedNow);
     final container = ProviderContainer(
       overrides: [
         workoutSensorSourceProvider.overrideWithValue(mock),
         workoutLogApiProvider.overrideWithValue(logApi ?? _RecordingLogApi()),
+        if (analytics != null)
+          analyticsServiceProvider.overrideWithValue(analytics),
       ],
     );
     addTearDown(container.dispose);
@@ -571,6 +577,84 @@ void main() {
       expect(stateOf(container).isComplete, isTrue);
       await controllerOf(container).stop();
       expect(stateOf(container).isIdle, isTrue);
+    });
+  });
+
+  group('analytics', () {
+    test('logs workout_started with coarse plan counts on start', () async {
+      final analytics = MockAnalyticsService();
+      final (container, _) = makeSession(analytics: analytics);
+
+      await controllerOf(container).start(planOf(name: 'Push Day', exercises: const [
+        SessionExercise(exercise: TrackedExercise(name: 'Squat'), targetReps: 5),
+        SessionExercise(exercise: TrackedExercise(name: 'Bench'), targetReps: 5),
+      ]));
+      await pumpEventQueue();
+
+      final started = analytics.events
+          .where((e) => e.name == AnalyticsEvents.workoutStarted)
+          .toList();
+      expect(started, hasLength(1));
+      expect(started.single.parameters['plan'], 'Push Day');
+      expect(started.single.parameters['exercises'], 2);
+    });
+
+    test('logs workout_completed with set + rep totals on completion',
+        () async {
+      final analytics = MockAnalyticsService();
+      final (container, mock) = makeSession(analytics: analytics);
+
+      // Single exercise, single set, 3-rep target → completing it finishes the
+      // workout via the last-set branch of completeSet.
+      await controllerOf(container).start(planOf(name: 'Quick', exercises: const [
+        SessionExercise(exercise: TrackedExercise(name: 'Squat'), targetReps: 3),
+      ]));
+      mock.emitRep();
+      mock.emitRep();
+      mock.emitRep();
+      await pumpEventQueue();
+
+      expect(stateOf(container).isComplete, isTrue);
+      final completed = analytics.events
+          .where((e) => e.name == AnalyticsEvents.workoutCompleted)
+          .toList();
+      expect(completed, hasLength(1));
+      expect(completed.single.parameters['plan'], 'Quick');
+      expect(completed.single.parameters['sets'], 1);
+      expect(completed.single.parameters['reps'], 3);
+    });
+
+    test('logs exactly one workout_completed across multi-exercise advance',
+        () async {
+      final analytics = MockAnalyticsService();
+      final (container, mock) = makeSession(analytics: analytics);
+
+      // Two exercises, one set each, zero rest → the final set finishes through
+      // the _advance fallback branch. Exactly one completed event must fire.
+      await controllerOf(container).start(planOf(exercises: const [
+        SessionExercise(
+          exercise: TrackedExercise(name: 'Squat'),
+          targetReps: 1,
+          restSeconds: 0,
+        ),
+        SessionExercise(
+          exercise: TrackedExercise(name: 'Bench'),
+          targetReps: 1,
+          restSeconds: 0,
+        ),
+      ]));
+      mock.emitRep(); // finishes Squat → advances to Bench
+      await pumpEventQueue();
+      mock.emitRep(); // finishes Bench → completes
+      await pumpEventQueue();
+
+      expect(stateOf(container).isComplete, isTrue);
+      expect(
+        analytics.events
+            .where((e) => e.name == AnalyticsEvents.workoutCompleted)
+            .length,
+        1,
+      );
     });
   });
 }
