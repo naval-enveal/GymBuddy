@@ -14,10 +14,91 @@
 ---
 
 ## Next up
-**M7 is complete** — PR opened from `m7-glasses` into `dev` for human review.
-All 7 tasks are done. **Do not merge and do not cut M8 until the PR is reviewed.**
-M8 is tagged `[HARDWARE-REQUIRED]` (no `[GATE CLEARED]`) and M9 is `[HUMAN GATE]`;
-both require a human to clear the gate before autonomous work can resume.
+**M8 is complete** on branch `m8-pose` (cut from `dev`). All five tasks are
+checked and pushed to `origin/m8-pose`. **ACTION NEEDED: open the PR
+`Milestone M8: pose` from `m8-pose` into `dev` manually** — the autonomous run
+could not open it because `gh` is not authenticated in this environment
+(`gh auth login` / no `GH_TOKEN`). Do not merge, do not cut the next branch.
+**After the merge, M9 (AI layer + premium) is next** — but it is tagged
+`[HUMAN GATE]` and not yet `[GATE CLEARED]`, so the next autonomous run must
+print `HUMAN_GATE: M9` and stop until a human clears the gate.
+
+Task 5 design notes (done): `plan_detail_screen.dart`'s `_TrackingBadge` now
+takes a `PoseTracking` and is built from `poseTrackingFor(exercise.name)` (the
+catalog in `app/lib/core/pose/pose_exercise_catalog.dart` — single source of
+truth), not the server `PlanExercise.formTracked` flag. A `switch` maps the three
+states to (key, label, icon, color): `formTracked` → `exercise-form-tracked` /
+"Form tracked" / visibility / accent; `repsOnly` → `exercise-reps-only` / "Reps
+only" / numbers / muted; `none` → `exercise-not-tracked` / "Not tracked" /
+visibility-off / muted (the new third state — previously the server flag only
+gave two). So the badge can never promise form feedback the pose layer lacks
+rules for, matching the session-mapper's catalog-driven `formTracked`.
+
+Catalog design notes (task 4, done): "which exercises the glasses can track from
+POV" is now one authoritative module, not a server flag the client trusts. Plans
+seed *descriptive* names ("Back Squat", "Dumbbell Romanian Deadlift") while the
+pose configs are keyed by short canonical movements ("squat", "romanian
+deadlift"), so exact lookup matched no real plan exercise. New
+`app/lib/core/pose/pose_exercise_matching.dart`: a pure `matchCanonicalKey(name,
+keys)` — case-insensitive **substring** match, **longest-key-wins** so the
+specific "romanian deadlift" beats the generic "deadlift". New
+`app/lib/core/pose/pose_exercise_catalog.dart`: a `PoseTracking` enum
+(`none`/`repsOnly`/`formTracked`) with an `isPoseTrackable`/`isRepTracked`/
+`isFormTracked` extension, `kPoseTrackableExercises` (the union of the rep
+`kExerciseAngleConfigs` + form `kExerciseFormConfigs` keysets — the curated set),
+`canonicalExerciseKey(name)`, and `poseTrackingFor(name)` (form config →
+`formTracked`, angle-only → `repsOnly`, else `none`). `resolveAngleConfig`/
+`resolveFormRules` now route through `matchCanonicalKey` too, so rep counting,
+form checks, and pose-trackability can never disagree about whether an exercise
+is recognised (existing exact-name + case-insensitive resolver tests stay green —
+an exact key is the longest match). `session_mapper.dart`'s `toSessionPlan()` now
+sets `TrackedExercise.formTracked` from `poseTrackingFor(e.name).isFormTracked`
+(the catalog), **not** the server `PlanExercise.formTracked` flag — so the engine
+(and the `MetaGlassesSensorSource` form-checker wiring it gates) never promises
+form feedback the pose layer has no rules for. Invariant enforced by test: every
+form-config movement also has a rep angle config (form tracking implies rep
+counting). 17 new tests (`pose_exercise_catalog_test.dart`: matcher substring/
+longest-wins/blank, `canonicalExerciseKey` real plan names + unrecognised,
+`poseTrackingFor` form/rep-only/none, capability getters, union set + form⊆angle
+invariant; + 1 in `session_models_test.dart`: catalog overrides the server flag
+both ways). `flutter analyze` clean, `flutter test` 301/301 green (the plans UI
+still reads the server flag — task 5 switches it to the catalog).
+
+Form-check design notes (task 3, done): pose-based form feedback mirrors the
+task-2 rep-counter design — pure-Dart, synchronous, reading the *same* joint
+angles. New `app/lib/core/pose/pose_form_checker.dart`: `FormRule`
+(`{id, pivot, from, to, minAngle, maxAngle, severity, message, minConfidence}`,
+asserts `minAngle <= maxAngle`) describes one joint-angle band — a measured angle
+outside `[minAngle, maxAngle]` is a fault — and `PoseFormChecker(List<FormRule>)`
+is an **edge-triggered** state machine: `processFrame(frame)` returns the cues
+that *newly* fired this frame (a held fault yields one cue, not one per frame,
+tracked via a `Set<String>` of active rule ids), can fire again after recovering
+into the good band, leaves a rule's state untouched when its keypoints are
+missing/low-confidence, and `reset()` clears state per set. The angle math that
+was private to `PoseRepCounter` (`_angleDeg`) moved to a shared
+`PoseFrame.angleDegrees(from, pivot, to, {minConfidence})` on
+`pose_landmarks.dart` (returns null on absent/low-confidence keypoints); the rep
+counter now reads it too, so rep counting and form checks gate on confidence
+identically. New `app/lib/core/pose/exercise_form_configs.dart`:
+`kExerciseFormConfigs` (squat/lunge forward-lean via the shoulder–hip–knee torso
+angle; deadlift/romanian-deadlift back-rounding via the ear–shoulder–hip spine
+line; push-up hip-sag) and `resolveFormRules(name)` (case-insensitive, empty list
+for unknowns) — thresholds approximate, calibrated on-device later.
+`MetaGlassesSensorSource.formCues` is now a broadcast `StreamController<FormCue>`
+(mirroring task-2's `reps`): native form cues (if the SDK ever emits any) merge in
+on first listen, and `startTracking` — when the exercise is `formTracked`, pose is
+ready, and rules exist — wires a `PoseFormChecker` driven off the **one** pose
+frame subscription (shared with the rep counter), pushing each cue into the
+controller; `stopTracking` resets it, `dispose` closes the controller. Gated on
+`formTracked` so non-form exercises emit nothing (the POV form-only contract).
+21 new tests (15 `pose_form_checker_test.dart`: `FormRule` assert + minConfidence
+default, checker good-band/fault/upper-bound/edge-trigger/recovery/low-confidence/
+absent-keypoint/multi-rule/reset, `resolveFormRules` known+case-insensitive/empty/
+coverage+message/unique-ids; 6 `meta_glasses_sensor_source_test.dart`: fault emits
+a cue, held fault edge-triggered to one, no cue when not form-tracked, no cue for
+an exercise without rules, cues stop after `stopTracking`). `flutter analyze`
+clean, `flutter test` 288/288 green (native isn't compilable headless — the Dart
+gate is what's verified).
 
 Wake-trigger design notes (task 6, done): the second *input* path from the
 glasses — a control signal, not a tracking one. The mic listens for a fixed wake
@@ -651,12 +732,12 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Custom mic-based wake trigger for Q&A
 - [x] App builds + runs with no hardware present
 
-### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  `[ ]`
-- [ ] Pose model integrated (tflite_flutter)
-- [ ] Rep detection fed by active sensor source
-- [ ] Basic joint-angle checks
-- [ ] Initial mirror/POV-friendly exercise set
-- [ ] UI marks exercises form-tracked vs rep-tracked-only
+### M8 — On-device rep counting & pose  [HARDWARE-REQUIRED]  [GATE CLEARED]  `[ ]`
+- [x] Pose model integrated (tflite_flutter)
+- [x] Rep detection fed by active sensor source
+- [x] Basic joint-angle checks
+- [x] Initial mirror/POV-friendly exercise set
+- [x] UI marks exercises form-tracked vs rep-tracked-only
 
 ### M9 — AI layer + premium  [HUMAN GATE]  `[ ]`
 - [ ] Server-side Claude API plan-generation service (profile + history + vitals)
@@ -677,6 +758,83 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-27 · M8 · UI marks exercises form-tracked vs rep-tracked-only vs
+  untracked (M8 task 5, last M8 task). `plan_detail_screen.dart`'s `_TrackingBadge`
+  now keys off the pose catalog's three-way `poseTrackingFor(exercise.name)`
+  (`PoseTracking` form-tracked / reps-only / none) — the single source of truth —
+  instead of the server's two-state `PlanExercise.formTracked` flag, so the badge
+  can never promise form feedback the pose layer has no rules for. Adds a third
+  "Not tracked" state (`exercise-not-tracked`, dimmed visibility-off icon) for
+  exercises the pose pipeline doesn't recognise. 1 new widget test (catalog
+  overrides the server flag across all three states: "Back Squat"→form,
+  "Bicep Curl"→reps-only, "Plank"→not-tracked). `flutter analyze` clean,
+  `flutter test` 302/302 green. All M8 tasks complete.
+- 2026-06-27 · M8 · Initial mirror/POV-friendly exercise set (M8 task 4). New
+  `app/lib/core/pose/pose_exercise_catalog.dart` is the single source of truth for
+  pose-trackability: a `PoseTracking` enum (`none`/`repsOnly`/`formTracked`),
+  `kPoseTrackableExercises` (union of the rep + form config keysets), and
+  `poseTrackingFor(name)`. New `pose_exercise_matching.dart` — a pure
+  `matchCanonicalKey` (case-insensitive substring, longest-key-wins) so descriptive
+  plan names ("Back Squat", "Dumbbell Romanian Deadlift") resolve to the canonical
+  movements; `resolveAngleConfig`/`resolveFormRules` now route through it too.
+  `session_mapper.dart` sets `TrackedExercise.formTracked` from the catalog, not the
+  server flag. 18 new tests. `flutter analyze` clean, `flutter test` 301/301.
+- 2026-06-27 · M8 · Basic joint-angle form checks (M8 task 3). New
+  `app/lib/core/pose/pose_form_checker.dart` — `FormRule` (a joint-angle band +
+  severity/message) and `PoseFormChecker` (edge-triggered fault detector reading
+  the same angles as `PoseRepCounter`; one cue per fault, re-fires after recovery,
+  `reset()` per set). Angle math extracted to a shared
+  `PoseFrame.angleDegrees(from, pivot, to, {minConfidence})`; the rep counter now
+  reads it too. New `exercise_form_configs.dart` — `kExerciseFormConfigs`
+  (squat/lunge forward-lean, deadlift/RDL back-rounding, push-up hip-sag) +
+  `resolveFormRules`. `MetaGlassesSensorSource.formCues` is now a broadcast
+  controller; `startTracking` wires a `PoseFormChecker` off the shared pose-frame
+  subscription, gated on `formTracked`, pushing pose-derived cues through it.
+  21 new tests. `flutter analyze` clean, `flutter test` 288/288 green.
+- 2026-06-27 · M8 · Rep detection fed by active sensor source (M8 task 2).
+  New `app/lib/core/pose/pose_rep_counter.dart` — `RepAngleConfig` (pivot/from/to
+  keypoints + low/high angle thresholds + minConfidence) and `PoseRepCounter`
+  (pure-Dart joint-angle state machine: top→below-low → bottom → above-high → top
+  = one rep, emits `RepEvent`; `reset()` clears count + phase per set).
+  New `app/lib/core/pose/exercise_angle_configs.dart` — `kExerciseAngleConfigs`
+  (8 POV/mirror-visible exercises: squat, deadlift, bicep curl, push-up, lunge,
+  shoulder press, romanian deadlift, overhead press) and `resolveAngleConfig(name)`
+  (case-insensitive lookup, null for unknown exercises).
+  `MetaGlassesSensorSource` rewritten: added `kGlassesRepsChannel` constant for
+  the native DAT-SDK rep channel; `reps` is now a lazy
+  `StreamController<RepEvent>.broadcast` that subscribes to the native channel on
+  first listen and cancels on last unsubscribe (native events merged in case a
+  future SDK version adds them); `startTracking` resolves the angle config for the
+  exercise and, when pose is ready, wires a `PoseRepCounter` that pushes `RepEvent`s
+  into the same broadcast controller — silently skipped when pose isn't loaded or
+  the exercise has no config; `stopTracking` cancels the per-set pose subscription
+  and resets the counter; `dispose` closes the controller and tears down the pose
+  detector. 30 new tests: 14 `pose_rep_counter_test.dart` (`RepAngleConfig` assert
+  + minConfidence default, `PoseRepCounter` zero-start / top-stays / one-rep cycle /
+  no-rep-without-bottom / two-reps / reset / low-confidence / absent-keypoint;
+  `resolveAngleConfig` case-insensitive / unknown→null / full-coverage / all-expected),
+  4 new `meta_glasses_sensor_source_test.dart` (wires PoseRepCounter on known+ready,
+  stops after stopTracking, skips for unknown exercise, skips when pose not ready).
+  `flutter analyze` clean, `flutter test` 268/268 green.
+- 2026-06-27 · M8 · Pose model integrated (tflite_flutter). New `app/lib/core/pose/`:
+  `pose_landmarks.dart` — `KeypointId` enum (17 COCO keypoints), `Keypoint` value
+  type (x/y/confidence in 0..1), `PoseFrame` (list of keypoints + timestamp,
+  `operator[]` by id); `pose_detector.dart` — `PoseInput` typed camera-frame
+  value type (rgb bytes + width/height/timestamp, asserted-length), `PoseDetector`
+  interface (`isReady`, `Future<bool> init()`, `Stream<PoseFrame> frames`,
+  `dispose`), `poseDetectorProvider` (defaults to `MockPoseDetector`),
+  `MockPoseDetector` (broadcast `frames`, manual `emitFrame`, throws after
+  dispose); `tflite_pose_detector.dart` — `TflitePoseDetector` (`frameSource`
+  injectable stream, `modelAsset` injectable path, `loadInterpreter` injectable
+  loader for tests, lazy `init` that catches all failures + returns `false`,
+  `buildInputTensor` nearest-neighbour resize → `[1,192,192,3]` uint8
+  `@visibleForTesting` static, `decodeOutput` MoveNet `[1,1,17,3]`→`PoseFrame`
+  `@visibleForTesting` static). `assets/models/` directory + `.gitkeep` added;
+  `tflite_flutter: ^0.11.0` in pubspec. `TflitePoseDetector` is never imported
+  by any test (no FFI load under `flutter test`). 9 new Dart tests (provider
+  default, Keypoint equality, PoseFrame operator[], MockPoseDetector init/isReady/
+  broadcast/emitFrame/use-after-dispose/multi-subscriber). `flutter analyze` clean,
+  `flutter test` 239/239 green.
 - 2026-06-27 · M7 · App builds + runs with no hardware present, completing M7.
   Added `app/test/sensors/hardware_free_smoke_test.dart`: an end-to-end
   hardware-free smoke test that calls `resolveWorkoutSensorSource()` with real

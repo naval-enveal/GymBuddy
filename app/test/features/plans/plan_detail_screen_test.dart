@@ -126,4 +126,39 @@ void main() {
     expect(find.byKey(const Key('plan-adopt')), findsOneWidget);
     expect(find.byKey(const Key('plan-active')), findsNothing);
   });
+
+  testWidgets(
+      'badges each exercise by the pose catalog three-way classification',
+      (WidgetTester tester) async {
+    // Names chosen to span the catalog: "Back Squat" → form-tracked,
+    // "Bicep Curl" → reps-only (angle config, no form rules), "Plank" →
+    // not pose-trackable at all.
+    const plan = PlanTemplate(
+      id: 't1',
+      name: 'Push Pull Legs',
+      matchScore: 0,
+      equipment: ['dumbbells'],
+      workouts: [
+        PlanWorkout(
+          name: 'Day One',
+          exercises: [
+            PlanExercise(name: 'Back Squat', formTracked: false, sets: 3, reps: 5),
+            PlanExercise(name: 'Bicep Curl', formTracked: true, sets: 3, reps: 10),
+            PlanExercise(name: 'Plank', formTracked: true, sets: 3, reps: 1),
+          ],
+        ),
+      ],
+    );
+    await _mount(tester, plan, _FakePlanApi());
+
+    // The catalog, not the server flag, decides the badge: "Back Squat" reads
+    // form-tracked despite its false server flag, and "Bicep Curl"/"Plank" read
+    // reps-only / not-tracked despite their true flags.
+    expect(find.byKey(const Key('exercise-form-tracked')), findsOneWidget);
+    expect(find.byKey(const Key('exercise-reps-only')), findsOneWidget);
+    expect(find.byKey(const Key('exercise-not-tracked')), findsOneWidget);
+    expect(find.text('Form tracked'), findsOneWidget);
+    expect(find.text('Reps only'), findsOneWidget);
+    expect(find.text('Not tracked'), findsOneWidget);
+  });
 }

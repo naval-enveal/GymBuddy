@@ -1,7 +1,46 @@
+import 'dart:math' as math;
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymbuddy/core/pose/pose_detector.dart';
 import 'package:gymbuddy/sensors/meta_glasses_sensor_source.dart';
 import 'package:gymbuddy/sensors/sensor_source.dart';
+
+/// Builds a PoseFrame with a leftHip–leftKnee–leftAnkle angle of [angleDeg].
+/// Used to drive the PoseRepCounter with squat-shaped frames in pose-path tests.
+PoseFrame _squatFrame(double angleDeg) {
+  final rad = angleDeg * math.pi / 180;
+  return PoseFrame(
+    keypoints: [
+      const Keypoint(id: KeypointId.leftHip, x: 0, y: 1, confidence: 0.9),
+      const Keypoint(id: KeypointId.leftKnee, x: 0, y: 0, confidence: 0.9),
+      Keypoint(
+        id: KeypointId.leftAnkle,
+        x: math.sin(rad),
+        y: math.cos(rad),
+        confidence: 0.9,
+      ),
+    ],
+  );
+}
+
+/// Builds a PoseFrame with a leftShoulder–leftHip–leftKnee (torso) angle of
+/// [angleDeg] — drives the squat forward-lean form rule.
+PoseFrame _torsoFrame(double angleDeg) {
+  final rad = angleDeg * math.pi / 180;
+  return PoseFrame(
+    keypoints: [
+      const Keypoint(id: KeypointId.leftShoulder, x: 0, y: 1, confidence: 0.9),
+      const Keypoint(id: KeypointId.leftHip, x: 0, y: 0, confidence: 0.9),
+      Keypoint(
+        id: KeypointId.leftKnee,
+        x: math.sin(rad),
+        y: math.cos(rad),
+        confidence: 0.9,
+      ),
+    ],
+  );
+}
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -11,6 +50,7 @@ void main() {
   const repsChannel = EventChannel(kGlassesRepsChannel);
   const formCuesChannel = EventChannel(kGlassesFormCuesChannel);
   const wakeChannel = EventChannel(kGlassesWakeChannel);
+  const cameraChannel = EventChannel(kGlassesCameraChannel);
 
   // Records the control-channel traffic the source emits, and replies with
   // whatever the current test queued up.
@@ -31,6 +71,7 @@ void main() {
     messenger.setMockStreamHandler(repsChannel, null);
     messenger.setMockStreamHandler(formCuesChannel, null);
     messenger.setMockStreamHandler(wakeChannel, null);
+    messenger.setMockStreamHandler(cameraChannel, null);
   });
 
   group('connect', () {
@@ -43,7 +84,7 @@ void main() {
               'formTracking': true,
             },
           };
-      final source = MetaGlassesSensorSource();
+      final source = MetaGlassesSensorSource(poseDetector: MockPoseDetector());
 
       final availability = await source.connect();
 
@@ -81,7 +122,7 @@ void main() {
               'formTracking': false,
             },
           };
-      final source = MetaGlassesSensorSource();
+      final source = MetaGlassesSensorSource(poseDetector: MockPoseDetector());
 
       await source.connect();
       expect(
@@ -366,6 +407,255 @@ void main() {
       );
       final source = MetaGlassesSensorSource();
       expect(source.wakeEvents.isBroadcast, isTrue);
+    });
+  });
+
+  group('camera frames + pose detector', () {
+    test('decodes native camera frame maps onto PoseInput', () {
+      messenger.setMockStreamHandler(
+        cameraChannel,
+        MockStreamHandler.inline(
+          onListen: (arguments, sink) {
+            sink.success(<String, Object?>{
+              'rgb': Uint8List.fromList(List<int>.filled(2 * 1 * 3, 7)),
+              'width': 2,
+              'height': 1,
+              'timestampMs': 1000,
+            });
+          },
+        ),
+      );
+      final source = MetaGlassesSensorSource(poseDetector: MockPoseDetector());
+
+      expect(
+        source.cameraFrames,
+        emits(
+          predicate<PoseInput>(
+            (p) =>
+                p.width == 2 &&
+                p.height == 1 &&
+                p.rgb.length == 6 &&
+                p.timestamp == DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        ),
+      );
+    });
+
+    test('connect initialises the pose detector when available', () async {
+      methodReply = (call) => <String, Object?>{
+            'availability': 'available',
+            'capabilities': <String, Object?>{
+              'repCounting': true,
+              'formTracking': true,
+            },
+          };
+      final pose = MockPoseDetector();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      expect(pose.isReady, isFalse);
+      await source.connect();
+      expect(pose.isReady, isTrue);
+      expect(source.poseDetector, same(pose));
+    });
+
+    test('connect leaves the pose detector idle when unavailable', () async {
+      methodReply = (call) => <String, Object?>{'availability': 'unavailable'};
+      final pose = MockPoseDetector();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      await source.connect();
+      expect(pose.isReady, isFalse);
+    });
+
+    test('dispose tears down the pose detector', () async {
+      final pose = MockPoseDetector();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      await source.dispose();
+
+      // A disposed MockPoseDetector rejects further use.
+      expect(
+        () => pose.emitFrame(const PoseFrame(keypoints: [])),
+        throwsStateError,
+      );
+    });
+  });
+
+  group('pose-based rep counting', () {
+    test('startTracking wires PoseRepCounter when pose is ready and config exists',
+        () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: false),
+      );
+
+      // Emit a down frame (angle ~80° < 90° low threshold).
+      pose.emitFrame(_squatFrame(80));
+      // Emit an up frame (angle ~160° > 150° high threshold) — that's one rep.
+      pose.emitFrame(_squatFrame(160));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, hasLength(1));
+      expect(reps.first.index, 1);
+    });
+
+    test('pose reps stop flowing after stopTracking', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat'),
+      );
+      await source.stopTracking();
+
+      pose.emitFrame(_squatFrame(80));
+      pose.emitFrame(_squatFrame(160));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, isEmpty);
+    });
+
+    test('startTracking skips pose wiring for unknown exercises', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'handstand'),
+      );
+
+      pose.emitFrame(_squatFrame(80));
+      pose.emitFrame(_squatFrame(160));
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, isEmpty);
+    });
+
+    test('startTracking skips pose wiring when pose is not ready', () async {
+      final pose = MockPoseDetector(); // not initialised
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final reps = <RepEvent>[];
+      source.reps.listen(reps.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat'),
+      );
+
+      pose.emitFrame(_squatFrame(80));
+      pose.emitFrame(_squatFrame(160));
+      await Future<void>.delayed(Duration.zero);
+      expect(reps, isEmpty);
+    });
+  });
+
+  group('pose-based form cues', () {
+    test('emits a form cue when a form-tracked exercise breaks form', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: true),
+      );
+
+      // A torso angle of 30° (< the 45° squat threshold) is a forward-lean fault.
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, hasLength(1));
+      expect(cues.single.severity, FormSeverity.minor);
+      expect(cues.single.message, contains('chest up'));
+    });
+
+    test('a held fault is edge-triggered into a single cue', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: true),
+      );
+
+      pose.emitFrame(_torsoFrame(30));
+      pose.emitFrame(_torsoFrame(25));
+      pose.emitFrame(_torsoFrame(35));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, hasLength(1));
+    });
+
+    test('emits no form cue when the exercise is not form-tracked', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: false),
+      );
+
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, isEmpty);
+    });
+
+    test('emits no form cue for an exercise without form rules', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'bicep curl', formTracked: true),
+      );
+
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, isEmpty);
+    });
+
+    test('form cues stop flowing after stopTracking', () async {
+      final pose = MockPoseDetector();
+      await pose.init();
+      final source = MetaGlassesSensorSource(poseDetector: pose);
+
+      final cues = <FormCue>[];
+      source.formCues.listen(cues.add);
+
+      await source.startTracking(
+        const TrackedExercise(name: 'squat', formTracked: true),
+      );
+      await source.stopTracking();
+
+      pose.emitFrame(_torsoFrame(30));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cues, isEmpty);
     });
   });
 }
