@@ -17,22 +17,67 @@
 **M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
 branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
 Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), 3
-(**Analytics + crash reporting**), and 4 (**TestFlight pipeline**) are **done**
-and pushed: a shared `StateMessage` widget backs the empty/error states; the
-glanceable design-system widgets (RepCounter/RestTimer/StatRing/Sparkline/
-MetricTile) expose single spoken `Semantics` labels with optional overrides, the
-unlabeled IconButtons gained tooltips, and the grayscale contrast ramp was
-confirmed at WCAG AA; product analytics + crash reporting now run behind a
-mock-first `AnalyticsService` seam (Firebase Analytics + Crashlytics impl wired
-at the composition root, mock default + generic crash handlers as the
-Firebase-free fallback) with call sites at auth (login/sign_up + setUserId/clear)
-and workout (started/completed); and an iOS TestFlight pipeline (fastlane `beta`
-lane + a tag/dispatch-gated GitHub Actions workflow, App Store Connect API-key
-auth, `match` for signing, all credentials via env/secrets).
-**Next up: task 5 — Firebase App Distribution pipeline** (the Android beta
-analogue of TestFlight). After that: the Meta glasses release-channel build
-target. When all six M10 tasks are checked, open PR `Milestone M10: beta` from
+(**Analytics + crash reporting**), 4 (**TestFlight pipeline**), and 5
+(**Firebase App Distribution pipeline**) are **done** and pushed: a shared
+`StateMessage` widget backs the empty/error states; the glanceable design-system
+widgets (RepCounter/RestTimer/StatRing/Sparkline/MetricTile) expose single
+spoken `Semantics` labels with optional overrides, the unlabeled IconButtons
+gained tooltips, and the grayscale contrast ramp was confirmed at WCAG AA;
+product analytics + crash reporting now run behind a mock-first
+`AnalyticsService` seam (Firebase Analytics + Crashlytics impl wired at the
+composition root, mock default + generic crash handlers as the Firebase-free
+fallback) with call sites at auth (login/sign_up + setUserId/clear) and workout
+(started/completed); an iOS TestFlight pipeline (fastlane `beta` lane + a
+tag/dispatch-gated GitHub Actions workflow, App Store Connect API-key auth,
+`match` for signing, all credentials via env/secrets); and an Android Firebase
+App Distribution pipeline (fastlane `beta` lane uploading a signed release APK
+via the `firebase_app_distribution` plugin, service-account auth, env-driven
+release signing in `build.gradle.kts` with a debug fallback, a tag/dispatch-gated
+workflow, all credentials via env/secrets).
+**Next up: task 6 — Meta glasses release-channel build target** (the last M10
+task). When all six M10 tasks are checked, open PR `Milestone M10: beta` from
 `m10-polish` into `dev` and stop for human review.
+
+Firebase App Distribution pipeline design notes (task 5, done): the Android beta
+analogue of the iOS TestFlight pipeline, mirroring its shape. Lives in
+`app/android/fastlane/` + `.github/workflows/android-firebase-distribution.yml`,
+separate from `ci.yml` so it never runs on an ordinary push. Trigger: a `v*` tag
+push or a manual **Run workflow** dispatch only. **fastlane** (`Fastfile` `beta`
+lane): uploads the prebuilt signed release APK to Firebase App Distribution via
+the `firebase_app_distribution` plugin (`Pluginfile`), authenticating with a
+Google **service-account JSON** (`service_credentials_file`, Firebase App
+Distribution Admin role — no interactive login, so it runs unattended), targeting
+`FIREBASE_ANDROID_APP_ID` and `FIREBASE_DISTRIBUTION_GROUPS` (default
+`internal-testers`); the lane fails fast with a clear message if the APK is
+missing. `Appfile` reads the package name (`com.gymbuddy.gymbuddy`, overridable
+via `ANDROID_PACKAGE_NAME`); `Gemfile` pins fastlane `~> 2.222` and pulls in the
+plugin. **Release signing** (`app/android/app/build.gradle.kts`): replaced the
+debug-keys TODO with a real release `signingConfig` that reads the keystore from
+`key.properties` (local, gitignored) or `ANDROID_KEYSTORE_PATH`/`_PASSWORD`/
+`ANDROID_KEY_ALIAS`/`ANDROID_KEY_PASSWORD` env vars (CI), falling back to the
+debug keys when nothing is configured so local `flutter run --release` still
+works with no secrets. **Workflow** (`ubuntu-latest`): checkout → JDK 17
+(temurin) → Flutter (stable) → Ruby 3.2 w/ `bundler-cache` (`working-directory:
+app/android`) → `flutter pub get` → `flutter test` (gate before shipping) →
+decode the base64 keystore + service-account JSON into `$RUNNER_TEMP` and export
+their paths → `flutter build apk --release
+--dart-define=REVENUECAT_API_KEY=…` (the Gradle release signingConfig picks up
+the keystore env) → `bundle exec fastlane beta`. **Secrets via env only**
+(CLAUDE.md): every credential — `FIREBASE_ANDROID_APP_ID`,
+`FIREBASE_SERVICE_ACCOUNT_BASE64`, `FIREBASE_DISTRIBUTION_GROUPS`,
+`ANDROID_KEYSTORE_BASE64`/`_PASSWORD`/`ANDROID_KEY_ALIAS`/`_PASSWORD`, and the
+**public** `REVENUECAT_API_KEY` — comes from GitHub secrets; nothing signing- or
+account-related is committed. `.gitignore` gained the Android fastlane artifacts
+(`report.xml`, `Gemfile.lock`, `*.apk`, `*.aab`, decoded service-account JSON);
+required secrets + the one-time keystore/service-account bootstrap are documented
+in `app/android/fastlane/README.md` and linked from the root README. No app/
+server Dart/JS code changed (CI/release infra + Gradle signing), so the
+regression gate is the existing suite: `flutter analyze` clean, `flutter test`
+350/350 green (unchanged), both workflow YAMLs validated. (The signed APK build +
+Firebase upload can't run headless without an Android SDK/keystore/Firebase
+project — the fastlane+workflow+signing scaffolding gated on secrets is what's
+verified; a human completes the keystore/service-account bootstrap and sets the
+secrets.)
 
 TestFlight pipeline design notes (task 4, done): the iOS beta-delivery pipeline
 lives in `app/ios/fastlane/` + `.github/workflows/ios-testflight.yml`, separate
@@ -1046,13 +1091,29 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Accessibility pass
 - [x] Analytics + crash reporting
 - [x] TestFlight pipeline
-- [ ] Firebase App Distribution pipeline
+- [x] Firebase App Distribution pipeline
 - [ ] Meta glasses release-channel build target
 
 ---
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · Firebase App Distribution pipeline (M10 task 5). Added the
+  Android beta-delivery analogue of TestFlight: `app/android/fastlane/` (`beta`
+  lane — `firebase_app_distribution` plugin, service-account auth, uploads a
+  prebuilt signed release APK; `Appfile`/`Pluginfile`/`Gemfile`) driven by
+  `.github/workflows/android-firebase-distribution.yml` (`ubuntu-latest`, gated
+  on `v*` tags + manual dispatch so it never runs on ordinary pushes; JDK 17 →
+  `flutter test` gate → decode keystore + service-account secrets → `flutter
+  build apk --release` with the public RevenueCat dart-define → `bundle exec
+  fastlane beta`). Wired a real env/key.properties-driven release `signingConfig`
+  in `app/android/app/build.gradle.kts` (debug-keys fallback so local
+  `flutter run --release` still works). Every credential comes from GitHub
+  secrets (secrets via env only); `.gitignore` gained the Android fastlane
+  artifacts and `app/android/fastlane/README.md` documents the required secrets +
+  one-time keystore/service-account bootstrap (linked from the root README). No
+  Dart/JS changed — `flutter analyze` clean, `flutter test` 350/350 green
+  (unchanged), both workflow YAMLs valid.
 - 2026-06-28 · M10 · TestFlight pipeline (M10 task 4). Added an iOS
   beta-delivery pipeline: `app/ios/fastlane/` (`beta` lane — App Store Connect
   API-key auth, `match` read-only signing, build-number bump, `build_app` →

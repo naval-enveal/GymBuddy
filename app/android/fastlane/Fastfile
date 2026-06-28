@@ -1,0 +1,48 @@
+# GymBuddy — Android Firebase App Distribution pipeline.
+#
+# `fastlane beta` uploads a signed release APK to Firebase App Distribution —
+# the Android analogue of the iOS `fastlane beta` → TestFlight lane. Auth uses a
+# Google service-account JSON (no interactive login), so it runs unattended in
+# CI. Every credential comes from the environment — nothing secret is committed
+# (CLAUDE.md: secrets via env only).
+#
+# The APK is compiled by the CI workflow (`flutter build apk --release`) *before*
+# this lane runs, so the Flutter/Dart side (including the REVENUECAT_API_KEY
+# dart-define) is baked into the artifact. This lane only distributes it.
+
+default_platform(:android)
+
+# Flutter writes the release APK here, relative to the Flutter project root
+# (app/). fastlane runs from app/android, so step up one level.
+APK_PATH = "../build/app/outputs/flutter-apk/app-release.apk".freeze
+
+platform :android do
+  before_all do
+    # Tune git/agent behaviour for CI runs (no-op locally).
+    setup_ci if ENV["CI"] == "true"
+  end
+
+  desc "Upload a signed release APK to Firebase App Distribution"
+  lane :beta do
+    unless File.exist?(APK_PATH)
+      UI.user_error!(
+        "No APK at #{APK_PATH}. Run `flutter build apk --release` first " \
+        "(the CI workflow does this before invoking fastlane).",
+      )
+    end
+
+    firebase_app_distribution(
+      # The Firebase Android App ID, e.g. "1:1234567890:android:abcdef".
+      app: ENV.fetch("FIREBASE_ANDROID_APP_ID"),
+      # Path to the Google service-account JSON with the Firebase App
+      # Distribution Admin role. The workflow decodes a base64 secret to a file
+      # and points this at it.
+      service_credentials_file: ENV.fetch("FIREBASE_SERVICE_CREDENTIALS_FILE"),
+      android_artifact_type: "APK",
+      android_artifact_path: APK_PATH,
+      # Comma-separated tester groups configured in the Firebase console.
+      groups: ENV["FIREBASE_DISTRIBUTION_GROUPS"] || "internal-testers",
+      release_notes: ENV["FIREBASE_RELEASE_NOTES"] || "GymBuddy beta build",
+    )
+  end
+end

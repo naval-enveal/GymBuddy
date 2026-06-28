@@ -1,0 +1,5 @@
+# Android application identity for the Firebase App Distribution pipeline.
+# Read from the environment so nothing is hard-coded; defaults to the project's
+# applicationId but stays overridable for white-label/staging builds.
+
+package_name(ENV["ANDROID_PACKAGE_NAME"] || "com.gymbuddy.gymbuddy")

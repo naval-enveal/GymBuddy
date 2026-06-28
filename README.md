@@ -25,6 +25,11 @@ gymbuddy/
   `.github/workflows/ios-testflight.yml` on a `v*` tag push or manual dispatch.
   Required secrets and one-time signing bootstrap are documented in
   `app/ios/fastlane/README.md`. Ordinary pushes stay on `ci.yml`.
+- **Android → Firebase App Distribution:** `app/android/fastlane`
+  (`fastlane beta`), run from `.github/workflows/android-firebase-distribution.yml`
+  on a `v*` tag push or manual dispatch. Required secrets and one-time keystore /
+  service-account bootstrap are documented in `app/android/fastlane/README.md`.
+  Ordinary pushes stay on `ci.yml`.
 
 ## Sources of truth
 
