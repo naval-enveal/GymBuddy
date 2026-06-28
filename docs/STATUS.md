@@ -15,17 +15,59 @@
 
 ## Next up
 **M9 (AI layer + premium) is in progress** on branch `m9-ai` (cut from `dev`).
-Tasks 1 (plan generation) and 2 (coaching service) are **done** and pushed to
-`origin/m9-ai`. **Next up: M9 task 3 — "RevenueCat paywall + premium state."**
-This is the Flutter client side: integrate RevenueCat (`purchases_flutter`),
-expose premium entitlement state via a Riverpod provider, and gate the
-premium-only entry points (AI plan generation + AI coaching) behind a paywall
-screen. The **server** is the source of truth for entitlement — task 4 ("Premium
-gating enforced server-side") wires the Subscription record into the
-`/plans/generate` and `/coaching/cues` endpoints (currently ungated). Reuse the
-`claude.client` seam for any AI work; never put the Claude API key in the app
-(task 5). When all M9 tasks are checked, open PR `Milestone M9: ai` from `m9-ai`
-into `dev` (manually — `gh` is unauthenticated here) and stop.
+Tasks 1 (plan generation), 2 (coaching service), and 3 (RevenueCat paywall +
+premium state) are **done** and pushed to `origin/m9-ai`. **Next up: M9 task 4 —
+"Premium gating enforced server-side."** This wires the user's `Subscription`
+record (the server-side source of truth) into the currently-ungated
+`POST /plans/generate` and `POST /coaching/cues` endpoints so a free user is
+rejected (e.g. `402`/`403`) regardless of what the client claims — the client's
+`PremiumService`/`isPremiumProvider` is informational UX only (task 3). Reuse the
+existing `requireAuth` middleware pattern; add a premium-entitlement check
+(reconcile against the M1 `Subscription` model, `tier: 'premium'`). The final
+task 5 ("App never holds the Claude API key") is largely already satisfied — the
+key lives in `config.anthropic`/env behind the `claude.client` seam (tasks 1–2)
+and the app only holds the **public** RevenueCat SDK key (task 3) — but verify
+end to end. When all M9 tasks are checked, open PR `Milestone M9: ai` from
+`m9-ai` into `dev` (manually — `gh` is unauthenticated here) and stop.
+
+Premium client design notes (task 3, done): the client's view of entitlement,
+behind a mock-first seam — RevenueCat lives only in the real impl, never in
+feature code (same rule as `WorkoutSensorSource`/`HealthPermissionService`).
+`app/lib/features/premium/premium_service.dart`: `PremiumService` (abstract
+interface, every method **contracted never to throw** — store/network failure
+degrades to `free`/`empty`, a cancelled purchase returns the unchanged status),
+the RevenueCat-agnostic value types `PremiumStatus` (`free`/`premium`),
+`PremiumPackage`/`PremiumOffering` (value-equality projections of store
+packages, so the paywall never imports `purchases_flutter`), and
+`MockPremiumService` (the provider default — starts free, offers fixed packages,
+`purchase` flips to premium so the unlock flow runs end to end with no store,
+mirroring `MockSensorSource`). `revenuecat_premium_service.dart`:
+`RevenueCatPremiumService` over `purchases_flutter` (`^10.3.0`) — maps the
+`kPremiumEntitlementId` (`'premium'`) active entitlement to status, swallows
+every store/platform failure (incl. the user-cancelled purchase error code), and
+`configure({apiKey})` is best-effort. `premium_controller.dart`:
+`PremiumController extends AsyncNotifier<PremiumState>` (`build()` reads
+status+offering concurrently; `purchase`/`restore` fold the result back behind a
+single-flight `purchasing` flag that's **always** cleared even if the service
+throws; `refresh()` re-reads) + `isPremiumProvider` (a plain `bool`, `false`
+until premium is positively confirmed — the safe default; server enforces the
+real gate). `paywall_screen.dart`: renders the controller state (spinner /
+retryable error / upsell with per-package buy buttons + restore / `_PremiumActive`
+confirmation; empty offering → "purchases unavailable" + restore). `premium_gate.dart`:
+`PremiumGate` reveals its child only when premium else a locked CTA that
+`openPaywall`s (mirrors `VitalsPermissionGate`). Profile tab gained a
+`_PremiumSection` (status badge + upgrade entry). **Composition root** (`main.dart`):
+the RevenueCat **public** SDK key arrives via `--dart-define=REVENUECAT_API_KEY`
+(not a secret, unlike the server-only Claude key); when set, `configure` runs and
+`premiumServiceProvider` is overridden to the real service — otherwise the mock
+default keeps dev/test working with no store. Note: Riverpod 3.x exposes the
+nullable value as `AsyncValue.value` (not `valueOrNull`), and `Override` isn't a
+public type so override lists are built inline. 22 tests (`test/features/premium/`:
+8 service incl. value-equality + mock unlock + provider default, 6 controller incl.
+single-flight + always-clear-on-throw + refresh, 3 gate, 5 paywall widget incl.
+buy→confirmation + unavailable + error→retry). `flutter analyze` clean,
+`flutter test` 324/324 green (the RevenueCat native purchase flow can't run
+headless — the seam + mock + injected-fake gate is what's verified).
 
 Coaching design notes (task 2, done): real-time form coaching lives server-side
 behind the same `claude.client` seam as plan generation (the single key-holding
@@ -811,7 +853,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 ### M9 — AI layer + premium  [GATE CLEARED]  `[ ]`
 - [x] Server-side Claude API plan-generation service (profile + history + vitals)
 - [x] Coaching service: sampled pose → short prioritized spoken cues
-- [ ] RevenueCat paywall + premium state
+- [x] RevenueCat paywall + premium state
 - [ ] Premium gating enforced server-side
 - [ ] App never holds the Claude API key
 
@@ -827,6 +869,25 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M9 · RevenueCat paywall + premium state (M9 task 3, client side).
+  New `app/lib/features/premium/`: a mock-first `PremiumService` seam
+  (`premium_service.dart` — `PremiumStatus`/`PremiumPackage`/`PremiumOffering`
+  value types + `MockPremiumService` default, every method contracted never to
+  throw), `RevenueCatPremiumService` over `purchases_flutter` `^10.3.0` (maps the
+  `'premium'` entitlement, swallows store/cancel failures, best-effort
+  `configure`), `PremiumController` (`AsyncNotifier<PremiumState>` — concurrent
+  status+offering read, single-flight `purchase`/`restore` that always clears the
+  `purchasing` flag, `refresh`) + `isPremiumProvider` (`false` until premium is
+  confirmed), `PaywallScreen` (spinner / retry / upsell with buy + restore /
+  active confirmation / purchases-unavailable), and `PremiumGate` (reveals child
+  when premium, else a locked CTA that opens the paywall — mirrors
+  `VitalsPermissionGate`). Profile tab gained a premium status section. The
+  composition root wires the real service only when the **public** RevenueCat SDK
+  key is supplied via `--dart-define=REVENUECAT_API_KEY` (not a secret; the app
+  still never holds the Claude key); otherwise the mock keeps dev/test working
+  with no store. Client entitlement is informational — the server enforces the
+  real gate (task 4). `flutter analyze` clean, `flutter test` 324/324 (22 new in
+  `test/features/premium/`).
 - 2026-06-28 · M9 · Server-side Claude API coaching service (M9 task 2). New
   `server/src/services/coaching.service.js` `generateCues` — takes the on-device
   pose/form snapshot from the body (`exercise`, `formCues`, `reps`/`targetReps`/
