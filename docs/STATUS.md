@@ -16,20 +16,58 @@
 ## Next up
 **M10 — Polish, analytics, beta** is the active milestone (`[GATE CLEARED]`) on
 branch `m10-polish` (descends from `dev` with the merged M9 work stacked on top).
-Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), and 3
-(**Analytics + crash reporting**) are **done** and pushed: a shared
-`StateMessage` widget backs the empty/error states; the glanceable design-system
-widgets (RepCounter/RestTimer/StatRing/Sparkline/MetricTile) expose single spoken
-`Semantics` labels with optional overrides, the unlabeled IconButtons gained
-tooltips, and the grayscale contrast ramp was confirmed at WCAG AA; and product
-analytics + crash reporting now run behind a mock-first `AnalyticsService` seam
-(Firebase Analytics + Crashlytics impl wired at the composition root, mock
-default + generic crash handlers as the Firebase-free fallback) with call sites
-at auth (login/sign_up + setUserId/clear) and workout (started/completed).
-**Next up: task 4 — TestFlight pipeline.** After that: Firebase App Distribution
-pipeline, and the Meta glasses release-channel build target. When all six M10
-tasks are checked, open PR `Milestone M10: beta` from `m10-polish` into `dev` and
-stop for human review.
+Tasks 1 (**Empty / error / loading states**), 2 (**Accessibility pass**), 3
+(**Analytics + crash reporting**), and 4 (**TestFlight pipeline**) are **done**
+and pushed: a shared `StateMessage` widget backs the empty/error states; the
+glanceable design-system widgets (RepCounter/RestTimer/StatRing/Sparkline/
+MetricTile) expose single spoken `Semantics` labels with optional overrides, the
+unlabeled IconButtons gained tooltips, and the grayscale contrast ramp was
+confirmed at WCAG AA; product analytics + crash reporting now run behind a
+mock-first `AnalyticsService` seam (Firebase Analytics + Crashlytics impl wired
+at the composition root, mock default + generic crash handlers as the
+Firebase-free fallback) with call sites at auth (login/sign_up + setUserId/clear)
+and workout (started/completed); and an iOS TestFlight pipeline (fastlane `beta`
+lane + a tag/dispatch-gated GitHub Actions workflow, App Store Connect API-key
+auth, `match` for signing, all credentials via env/secrets).
+**Next up: task 5 — Firebase App Distribution pipeline** (the Android beta
+analogue of TestFlight). After that: the Meta glasses release-channel build
+target. When all six M10 tasks are checked, open PR `Milestone M10: beta` from
+`m10-polish` into `dev` and stop for human review.
+
+TestFlight pipeline design notes (task 4, done): the iOS beta-delivery pipeline
+lives in `app/ios/fastlane/` + `.github/workflows/ios-testflight.yml`, separate
+from `ci.yml` so it never runs on an ordinary push (it needs a macOS runner and
+live Apple credentials). Trigger: a `v*` tag push or a manual **Run workflow**
+dispatch only. **fastlane** (`Fastfile` `beta` lane): authenticates with an **App
+Store Connect API key** (a base64'd `.p8` via `app_store_connect_api_key`,
+`is_key_content_base64: true`) — no Apple ID/2FA, so it runs unattended — fetches
+signing material **read-only** via `match` (`Matchfile`, storage `git`,
+`readonly` in CI so a build never mints/revokes certs), bumps the build number to
+`latest_testflight_build_number + 1` (rescued so the very-first upload still
+works), then `build_app` (Release, `app-store` export, `Runner.xcworkspace`/
+`Runner` scheme) → `upload_to_testflight` (`skip_waiting_for_build_processing`,
+internal only). `Appfile` reads bundle id (`com.gymbuddy.gymbuddy`, overridable
+via `IOS_BUNDLE_ID`) + both team ids from env; `Gemfile` pins fastlane `~>
+2.222`. **Workflow** (`macos-14`): checkout → Flutter (stable) → Ruby 3.2 w/
+`bundler-cache` (`working-directory: app/ios`) → `flutter pub get` → `flutter
+test` (gate before shipping) → `flutter build ios --release --no-codesign
+--dart-define=REVENUECAT_API_KEY=…` (compiles the Dart side so
+`Generated.xcconfig` carries the public RevenueCat key; the subsequent fastlane
+archive reuses these assets) → `bundle exec fastlane beta`. **Secrets via env
+only** (CLAUDE.md): every credential — `APP_STORE_CONNECT_API_KEY_ID`/
+`_ISSUER_ID`/`_KEY_CONTENT`, the two team ids, `MATCH_GIT_URL`/`MATCH_PASSWORD`/
+`MATCH_GIT_BASIC_AUTHORIZATION`, and the **public** `REVENUECAT_API_KEY` (kept in
+secrets so it isn't hard-coded, but not a secret like the server-only Claude key)
+— comes from GitHub secrets; nothing tied to the Apple account is committed.
+`.gitignore` gained the fastlane artifacts (`report.xml`, `Gemfile.lock`, `*.ipa`,
+`*.dSYM.zip`, …); required secrets + the one-time `fastlane match appstore`
+bootstrap are documented in `app/ios/fastlane/README.md` and linked from the root
+README. No app/server code changed (this is CI/release infra), so the regression
+gate is the existing suite: `flutter analyze` clean, `flutter test` 350/350 green
+(unchanged), workflow YAML validated. (The signed archive + TestFlight upload
+can't run headless without an Apple Developer account/macOS — the
+fastlane+workflow scaffolding gated on secrets is what's verified; a human
+completes the `match` bootstrap and sets the secrets.)
 
 Analytics design notes (task 3, done): product analytics + crash reporting live
 behind a mock-first `AnalyticsService` seam (`app/lib/core/analytics/`), the same
@@ -1007,7 +1045,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Empty / error / loading states across features
 - [x] Accessibility pass
 - [x] Analytics + crash reporting
-- [ ] TestFlight pipeline
+- [x] TestFlight pipeline
 - [ ] Firebase App Distribution pipeline
 - [ ] Meta glasses release-channel build target
 
@@ -1015,6 +1053,18 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M10 · TestFlight pipeline (M10 task 4). Added an iOS
+  beta-delivery pipeline: `app/ios/fastlane/` (`beta` lane — App Store Connect
+  API-key auth, `match` read-only signing, build-number bump, `build_app` →
+  `upload_to_testflight`; `Appfile`/`Matchfile`/`Gemfile`) driven by
+  `.github/workflows/ios-testflight.yml` (`macos-14`, gated on `v*` tags +
+  manual dispatch so it never runs on ordinary pushes; `flutter test` gate →
+  `flutter build ios --release` with the public RevenueCat dart-define →
+  `bundle exec fastlane beta`). Every credential comes from GitHub secrets
+  (secrets via env only); `.gitignore` gained the fastlane artifacts and
+  `app/ios/fastlane/README.md` documents the required secrets + one-time `match`
+  bootstrap (linked from the root README). No app/server code changed — `flutter
+  analyze` clean, `flutter test` 350/350 green (unchanged), workflow YAML valid.
 - 2026-06-28 · M10 · Analytics + crash reporting (M10 task 3). Added a
   mock-first `AnalyticsService` seam (`app/lib/core/analytics/`) — feature code
   never imports Firebase, same rule as the sensor/health/premium seams. The

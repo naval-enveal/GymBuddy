@@ -19,6 +19,13 @@ gymbuddy/
 - **App:** `cd app && flutter pub get && flutter run`
 - **Server:** `cd server && npm install && npm run dev`
 
+## Release pipelines
+
+- **iOS → TestFlight:** `app/ios/fastlane` (`fastlane beta`), run from
+  `.github/workflows/ios-testflight.yml` on a `v*` tag push or manual dispatch.
+  Required secrets and one-time signing bootstrap are documented in
+  `app/ios/fastlane/README.md`. Ordinary pushes stay on `ci.yml`.
+
 ## Sources of truth
 
 - `docs/PRODUCT_BRIEF.md` — product context

@@ -58,6 +58,14 @@ app/ios/Flutter/Generated.xcconfig
 app/ios/Flutter/flutter_export_environment.sh
 **/xcuserdata/
 
+# ─── fastlane (TestFlight pipeline) ────────────────────────────
+app/ios/fastlane/report.xml
+app/ios/fastlane/Preview.html
+app/ios/fastlane/test_output/
+app/ios/Gemfile.lock
+*.ipa
+*.dSYM.zip
+
 # ─── Logs / misc ───────────────────────────────────────────────
 *.log
 docs/build.log

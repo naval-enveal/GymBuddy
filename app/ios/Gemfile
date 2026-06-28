@@ -1,0 +1,5 @@
+# Pins the fastlane toolchain so local and CI runs use the same version.
+# Install with `bundle install`, then run lanes via `bundle exec fastlane <lane>`.
+source "https://rubygems.org"
+
+gem "fastlane", "~> 2.222"

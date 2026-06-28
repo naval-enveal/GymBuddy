@@ -1,0 +1,16 @@
+# Code-signing for CI via fastlane match: certificates + provisioning profiles
+# live encrypted in a private git repo (MATCH_GIT_URL), decrypted with
+# MATCH_PASSWORD. CI runs match in read-only mode so a build never mints or
+# revokes credentials — a human bootstraps them once with `bundle exec fastlane
+# match appstore` from a trusted machine.
+#
+# All inputs come from the environment so no signing material is committed.
+
+git_url(ENV["MATCH_GIT_URL"]) if ENV["MATCH_GIT_URL"]
+storage_mode("git")
+
+type("appstore")
+app_identifier([ENV["IOS_BUNDLE_ID"] || "com.gymbuddy.gymbuddy"])
+
+# In CI, never generate new certs/profiles — only fetch existing ones.
+readonly(ENV["CI"] == "true")
