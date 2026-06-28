@@ -15,16 +15,47 @@
 
 ## Next up
 **M9 (AI layer + premium) is in progress** on branch `m9-ai` (cut from `dev`).
-Task 1 — the server-side Claude plan-generation service — is **done** and
-pushed to `origin/m9-ai`. **Next up: M9 task 2 — "Coaching service: sampled
-pose → short prioritized spoken cues."** Reuse the new `claude.client` seam
-(`server/src/services/claude.client.js`) — it's the single key-holding entry
-point; inject a fake in tests via `setClient`. The coaching service should take
-sampled pose frames / form cues and ask Claude for a short, prioritized list of
-spoken cues (then `MetaGlassesSensorSource.playCue` delivers them on-device).
-Premium gating (task 4) and the RevenueCat paywall (task 3) are still ahead;
-when all M9 tasks are checked, open PR `Milestone M9: ai` from `m9-ai` into
-`dev` (manually — `gh` is unauthenticated here) and stop.
+Tasks 1 (plan generation) and 2 (coaching service) are **done** and pushed to
+`origin/m9-ai`. **Next up: M9 task 3 — "RevenueCat paywall + premium state."**
+This is the Flutter client side: integrate RevenueCat (`purchases_flutter`),
+expose premium entitlement state via a Riverpod provider, and gate the
+premium-only entry points (AI plan generation + AI coaching) behind a paywall
+screen. The **server** is the source of truth for entitlement — task 4 ("Premium
+gating enforced server-side") wires the Subscription record into the
+`/plans/generate` and `/coaching/cues` endpoints (currently ungated). Reuse the
+`claude.client` seam for any AI work; never put the Claude API key in the app
+(task 5). When all M9 tasks are checked, open PR `Milestone M9: ai` from `m9-ai`
+into `dev` (manually — `gh` is unauthenticated here) and stop.
+
+Coaching design notes (task 2, done): real-time form coaching lives server-side
+behind the same `claude.client` seam as plan generation (the single key-holding
+entry point; inject a fake via `setClient` in tests). `services/coaching.service.js`
+`generateCues(userId, {exercise, formCues?, reps?, targetReps?, setNumber?})`
+takes the on-device pose/form snapshot from the request body (pose lives
+on-device, never stored), reads the caller's Profile (`experience` + `injuries`)
+server-side to personalize and keep the wearer safe — **optional**, not required
+(unlike plan generation, coaching still runs with no profile), builds a
+system+user prompt, and calls `messages.create` with `output_config.format`
+json_schema (`CUES_SCHEMA`) on `config.anthropic.model` (`claude-opus-4-8`,
+`max_tokens` 400 — cues are tiny). Output runs through `sanitizeCues`: trims each
+cue, drops blanks/non-strings, clamps cue length (160), preserves model order
+(= priority) and caps the count at 3 — so malformed-but-parseable output can
+never flood the speakers; a clean set returns `[]` (never throws). No text block
+/ invalid JSON is a `502`; unconfigured AI is a `503` (via `getClient`). New
+`POST /coaching/cues` (`requireAuth` → `validateCoachingCues` → controller)
+returns `200 { cues: [...] }` (ordered, most important first); the app plays them
+via `MetaGlassesSensorSource.playCue`. `coaching.validators.js` accepts a
+required `exercise`, an optional `formCues` array (`{severity?, message, joint?}`,
+severities good/minor/major mirroring the Dart `FormSeverity`, ≤20 entries), and
+optional `reps`/`targetReps`/`setNumber` (per-field numeric bounds), stripping
+everything else. Premium gating is **not** wired on this endpoint yet (M9 task 4).
+12 new tests (`tests/coaching.test.js`: auth required, cues for a faulty set,
+prompt carries exercise+faults+set-progress+profile + model/structured-output,
+works with no profile, empty list for a clean set, sanitation trims/drops/caps,
+no-cues-array → `[]`, 502 invalid-JSON, 503 unconfigured, 400 missing-exercise,
+400 bad-severity, 400 out-of-range-reps). `npm run lint` clean, `npm test`
+130/130. (The native Claude call can't run headless — the seam + injected-fake
+gate is what's verified.)
 
 AI plan-generation design notes (task 1, done): server-side only — the Claude
 API key lives in env (`config.anthropic`, never the client) and all Claude
@@ -779,7 +810,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ### M9 — AI layer + premium  [GATE CLEARED]  `[ ]`
 - [x] Server-side Claude API plan-generation service (profile + history + vitals)
-- [ ] Coaching service: sampled pose → short prioritized spoken cues
+- [x] Coaching service: sampled pose → short prioritized spoken cues
 - [ ] RevenueCat paywall + premium state
 - [ ] Premium gating enforced server-side
 - [ ] App never holds the Claude API key
@@ -796,6 +827,22 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M9 · Server-side Claude API coaching service (M9 task 2). New
+  `server/src/services/coaching.service.js` `generateCues` — takes the on-device
+  pose/form snapshot from the body (`exercise`, `formCues`, `reps`/`targetReps`/
+  `setNumber`), reads the caller's Profile (`experience`+`injuries`) server-side
+  to personalize (optional — coaching runs without a profile), prompts
+  `claude-opus-4-8` through the `claude.client` seam with a json_schema
+  structured output (`max_tokens` 400), and runs the result through
+  `sanitizeCues` (trim, drop blanks/non-strings, clamp length 160, preserve
+  order = priority, cap at 3 — clean set → `[]`, never throws). No text / invalid
+  JSON → 502; unconfigured AI → 503. New `POST /coaching/cues` (`requireAuth` →
+  `validateCoachingCues`) → 200 `{ cues }` (the app plays them via
+  `MetaGlassesSensorSource.playCue`); validator requires `exercise`, accepts an
+  optional `formCues` array (good/minor/major severities, ≤20) + bounded
+  rep/set fields, strips the rest. Key stays server-side/env only. Premium
+  gating deferred to M9 task 4. `npm run lint` clean, `npm test` 130/130 (12 new
+  in `tests/coaching.test.js`).
 - 2026-06-28 · M9 · Server-side Claude API plan-generation service (M9 task 1).
   New `server/src/services/claude.client.js` (the single key-holding seam over
   `@anthropic-ai/sdk`; `getClient()` lazily builds from server-side env and
