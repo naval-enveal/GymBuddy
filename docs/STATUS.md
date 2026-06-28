@@ -14,23 +14,39 @@
 ---
 
 ## Next up
-**M9 (AI layer + premium) is in progress** on branch `m9-ai` (cut from `dev`).
-Tasks 1 (plan generation), 2 (coaching service), 3 (RevenueCat paywall + premium
-state), and 4 (premium gating enforced server-side) are **done** and pushed to
-`origin/m9-ai`. **Next up: M9 task 5 — "App never holds the Claude API key."**
-This is largely already satisfied by construction — the key lives in
-`config.anthropic`/env behind the server-only `claude.client` seam (tasks 1–2,
-`getClient()` builds the SDK client from env; the app never sees it) and the app
-only holds the **public** RevenueCat SDK key via `--dart-define=REVENUECAT_API_KEY`
-(task 3, not a secret). The task is to **verify** this end to end: confirm no
-`ANTHROPIC_API_KEY`/Claude key reference exists anywhere under `app/`, that the
-Flutter app reaches AI only through the gated server endpoints
-(`POST /plans/generate`, `POST /coaching/cues`) over `apiClient`, and that
-`.env.example`/docs make the server-only-key contract explicit. Add a guard
-(e.g. a test/lint check that fails if the key string appears in `app/`) if one
-doesn't already exist, so a regression is caught. When all M9 tasks are checked,
-open PR `Milestone M9: ai` from `m9-ai` into `dev` (manually — `gh` is
-unauthenticated here) and stop.
+**M9 (AI layer + premium) is COMPLETE** on branch `m9-ai` (cut from `dev`) — all
+five tasks checked and pushed to `origin/m9-ai`: plan generation (1), coaching
+service (2), RevenueCat paywall + premium state (3), server-side premium gating
+(4), and app-never-holds-the-key verification + regression guard (5). **Next up:
+open PR `Milestone M9: ai` from `m9-ai` into `dev`** — do it manually (`gh` is
+unauthenticated here) and stop; a human reviews and merges, then the next run cuts
+a fresh branch from `dev` for **M10 — Polish, analytics, beta**, which is tagged
+`[HUMAN GATE]` and NOT yet `[GATE CLEARED]` (so the first M10 run will print
+`HUMAN_GATE: M10` and stop until a human clears the gate).
+
+Task 5 design notes (done): "the app never holds the Claude API key" — verified
+end to end and locked with a guard. The key is server-side only by construction —
+`config.anthropic.apiKey` ← `ANTHROPIC_API_KEY` env, read in exactly one place
+(`config/env.js`) and used in exactly one place (the `claude.client` `getClient()`
+seam that lazily builds the `@anthropic-ai/sdk` client; both AI services go
+through it). Nothing under `app/` references the key or the SDK: the only matches
+for "Claude API key" in app sources are *prose* comments in `main.dart` /
+`revenuecat_premium_service.dart` explaining the contract; the app holds only the
+**public** RevenueCat key via `--dart-define=REVENUECAT_API_KEY` (not a secret).
+The app reaches AI exclusively through the premium-gated backend endpoints
+(`POST /plans/generate`, `POST /coaching/cues`) over the single `apiClient` seam.
+The server-only-key contract is documented in `.env.example`, `server/CLAUDE.md`,
+`app/CLAUDE.md`, and `config/env.js`. New regression guard
+`app/test/security/no_claude_key_test.dart` walks the app's shipping surface
+(`lib/`, `android/`, `ios/`, `macos`/`windows`/`linux`, `pubspec.yaml`; skips
+`build/`/`.dart_tool/`/`Pods/`/`.gradle/`/`ephemeral/` and `test/` itself) and
+fails if any of `ANTHROPIC_API_KEY`, an `sk-ant-` key prefix, or an Anthropic SDK
+dependency (`anthropic-ai`, `package:anthropic`) appears — it forbids key
+machinery, not prose, so the explanatory comments stay legal. A `files.length >
+10` sanity assertion prevents a vacuous pass from an empty/wrong-cwd walk;
+confirmed the guard fails on a planted token and passes once removed. No server
+changes were needed (the contract was already satisfied). `flutter analyze` clean,
+`flutter test` 325/325 green (+1).
 
 Premium-gating design notes (task 4, done): premium access is enforced
 server-side, never trusted from the client. New
@@ -872,12 +888,12 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Initial mirror/POV-friendly exercise set
 - [x] UI marks exercises form-tracked vs rep-tracked-only
 
-### M9 — AI layer + premium  [GATE CLEARED]  `[ ]`
+### M9 — AI layer + premium  [GATE CLEARED]  `[x]`
 - [x] Server-side Claude API plan-generation service (profile + history + vitals)
 - [x] Coaching service: sampled pose → short prioritized spoken cues
 - [x] RevenueCat paywall + premium state
 - [x] Premium gating enforced server-side
-- [ ] App never holds the Claude API key
+- [x] App never holds the Claude API key
 
 ### M10 — Polish, analytics, beta  [HUMAN GATE]  `[ ]`
 - [ ] Empty / error / loading states across features
@@ -891,6 +907,25 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M9 · App never holds the Claude API key (M9 task 5) — verified +
+  guarded. Confirmed end to end: the key lives only server-side
+  (`config.anthropic` ← `ANTHROPIC_API_KEY` env, behind the `claude.client`
+  `getClient()` seam — the single key-holder for both AI endpoints), no Claude/
+  Anthropic key reference or SDK dependency exists anywhere under `app/` (only
+  descriptive prose comments), and the app reaches AI exclusively through the
+  premium-gated backend endpoints (`POST /plans/generate`, `POST /coaching/cues`)
+  over the one `apiClient` network seam — never holding the key. The server-only
+  contract is documented in `.env.example`, `server/CLAUDE.md`, `app/CLAUDE.md`,
+  and `config/env.js`. The app ships only the *public* RevenueCat SDK key
+  (`--dart-define=REVENUECAT_API_KEY`, not a secret). New regression guard
+  `app/test/security/no_claude_key_test.dart` scans the app's shipping sources
+  (`lib/`/`android/`/`ios/`/`pubspec.yaml`, excluding build output + `test/`) and
+  fails the build if `ANTHROPIC_API_KEY`, an `sk-ant-` key, or an Anthropic SDK
+  dependency ever appears — it forbids key machinery, not prose (so the existing
+  "the key stays server-side" comments stay legal), and has a file-count sanity
+  check so an empty walk can't pass vacuously (verified it catches a planted
+  token). `flutter analyze` clean, `flutter test` 325/325 green (+1). M9 complete
+  — all five tasks checked; PR `Milestone M9: ai` (m9-ai → dev) to be opened next.
 - 2026-06-28 · M9 · Premium gating enforced server-side (M9 task 4). New
   `server/src/middleware/premium.middleware.js` `requirePremium` — mounted after
   `requireAuth`, it loads the caller's `Subscription` (the server-side source of
