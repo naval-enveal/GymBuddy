@@ -14,14 +14,52 @@
 ---
 
 ## Next up
-**M8 is complete** on branch `m8-pose` (cut from `dev`). All five tasks are
-checked and pushed to `origin/m8-pose`. **ACTION NEEDED: open the PR
-`Milestone M8: pose` from `m8-pose` into `dev` manually** — the autonomous run
-could not open it because `gh` is not authenticated in this environment
-(`gh auth login` / no `GH_TOKEN`). Do not merge, do not cut the next branch.
-**After the merge, M9 (AI layer + premium) is next** — the gate has been
-cleared (`[GATE CLEARED]`). Cut branch `m9-ai` from `dev` after the M8 merge
-and begin the first unchecked M9 task.
+**M9 (AI layer + premium) is in progress** on branch `m9-ai` (cut from `dev`).
+Task 1 — the server-side Claude plan-generation service — is **done** and
+pushed to `origin/m9-ai`. **Next up: M9 task 2 — "Coaching service: sampled
+pose → short prioritized spoken cues."** Reuse the new `claude.client` seam
+(`server/src/services/claude.client.js`) — it's the single key-holding entry
+point; inject a fake in tests via `setClient`. The coaching service should take
+sampled pose frames / form cues and ask Claude for a short, prioritized list of
+spoken cues (then `MetaGlassesSensorSource.playCue` delivers them on-device).
+Premium gating (task 4) and the RevenueCat paywall (task 3) are still ahead;
+when all M9 tasks are checked, open PR `Milestone M9: ai` from `m9-ai` into
+`dev` (manually — `gh` is unauthenticated here) and stop.
+
+AI plan-generation design notes (task 1, done): server-side only — the Claude
+API key lives in env (`config.anthropic`, never the client) and all Claude
+calls go through the new `claude.client.js` seam (`getClient()` lazily builds
+the `@anthropic-ai/sdk` client from the key and throws `503` when unset;
+`setClient()` injects a fake for tests so AI is exercised with no network).
+`services/ai-plan.service.js` `generatePlan(userId, {vitals})` reads the
+caller's Profile + the 10 most recent `WorkoutLog`s server-side, takes the
+client-supplied `vitals` snapshot (resting HR / HRV / sleep / steps / readiness
+— vitals live on-device in HealthKit/Health Connect, so they arrive in the
+request body, never stored), builds a system+user prompt, and calls
+`messages.create` with `output_config.format` json_schema (`PLAN_SCHEMA`) on
+`claude-opus-4-8`. The model output is parsed and run through
+`sanitizeGeneratedPlan` — clamps every numeric to its model bounds, drops
+nameless/empty entries, filters unknown equipment, and falls back to the
+profile's own goal/experience for out-of-vocabulary enums — so malformed-but-
+parseable output can never throw at the Mongoose layer; a plan with no usable
+workouts (or invalid JSON / no text block) is a `502`. `persistGeneratedPlan`
+then mirrors `adoptTemplate`: owned Workouts + an owned, non-template,
+`isActive` Plan with `sourceTemplate:null`, deactivating any prior active plan
+(one active plan per user, server-enforced). New `POST /plans/generate`
+(`requireAuth` → `validateGeneratePlan` → controller) returns `201 { plan }`
+with workouts populated; `ai-plan.validators.js` accepts only an optional
+`vitals` object (per-field numeric bounds, strips everything else).
+`error.middleware` now renders `ApiError` verbatim for **all** statuses
+(previously 4xx-only) so a deliberate `502`/`503` reaches the client instead of
+an opaque `500` — `ApiError` messages are curated/client-safe by construction.
+Premium gating is **not** wired on this endpoint yet (a later M9 task). Added
+`@anthropic-ai/sdk` dependency. 11 new tests (`tests/ai-plan.test.js`: auth
+required, profile-required, generate+persist owned/active, prior-active
+deactivated, prompt carries profile+history+vitals + model/structured-output,
+malformed-output sanitation, 502 no-workouts, 502 invalid-JSON, 503
+unconfigured, 400 bad-vitals ×2). `npm run lint` clean, `npm test` 118/118.
+(The native Claude call can't run headless — the seam + injected-fake gate is
+what's verified.)
 
 Task 5 design notes (done): `plan_detail_screen.dart`'s `_TrackingBadge` now
 takes a `PoseTracking` and is built from `poseTrackingFor(exercise.name)` (the
@@ -740,7 +778,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] UI marks exercises form-tracked vs rep-tracked-only
 
 ### M9 — AI layer + premium  [GATE CLEARED]  `[ ]`
-- [ ] Server-side Claude API plan-generation service (profile + history + vitals)
+- [x] Server-side Claude API plan-generation service (profile + history + vitals)
 - [ ] Coaching service: sampled pose → short prioritized spoken cues
 - [ ] RevenueCat paywall + premium state
 - [ ] Premium gating enforced server-side
@@ -758,6 +796,20 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
+- 2026-06-28 · M9 · Server-side Claude API plan-generation service (M9 task 1).
+  New `server/src/services/claude.client.js` (the single key-holding seam over
+  `@anthropic-ai/sdk`; `getClient()` lazily builds from server-side env and
+  503s when unset; `setClient()` injects a fake for tests) and
+  `ai-plan.service.js` `generatePlan` — reads the caller's Profile + 10 recent
+  WorkoutLogs server-side, takes the client-supplied `vitals` snapshot, prompts
+  `claude-opus-4-8` with a json_schema structured output, sanitizes/clamps the
+  result (502 if unusable), and persists it as the caller's active owned plan
+  (deactivating any prior, `sourceTemplate:null`), mirroring `adoptTemplate`.
+  New `POST /plans/generate` (`requireAuth` → `validateGeneratePlan`) → 201
+  `{ plan }`; `error.middleware` now renders `ApiError` verbatim for all
+  statuses so 502/503 reach the client. Key is server-side/env only (never the
+  app). Premium gating deferred to a later M9 task. `@anthropic-ai/sdk` added.
+  `npm run lint` clean, `npm test` 118/118 (11 new in `tests/ai-plan.test.js`).
 - 2026-06-27 · M8 · UI marks exercises form-tracked vs rep-tracked-only vs
   untracked (M8 task 5, last M8 task). `plan_detail_screen.dart`'s `_TrackingBadge`
   now keys off the pose catalog's three-way `poseTrackingFor(exercise.name)`

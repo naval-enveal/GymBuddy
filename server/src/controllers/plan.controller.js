@@ -1,6 +1,7 @@
 'use strict';
 
 const planService = require('../services/plan.service');
+const aiPlanService = require('../services/ai-plan.service');
 
 /**
  * Plan endpoints. The caller is authenticated by `requireAuth` (so `req.userId`
@@ -22,4 +23,16 @@ async function getActivePlan(req, res) {
   return res.status(200).json({ plan: plan ? plan.toJSON() : null });
 }
 
-module.exports = { getTemplates, adoptPlan, getActivePlan };
+/**
+ * Generate a personalized plan with the Claude API from the caller's profile +
+ * recent history + the vitals snapshot in the body, persist it as their active
+ * plan, and return it. `req.body.vitals` is the validated snapshot (or absent).
+ */
+async function generatePlan(req, res) {
+  const plan = await aiPlanService.generatePlan(req.userId, {
+    vitals: req.body.vitals,
+  });
+  return res.status(201).json({ plan: plan.toJSON() });
+}
+
+module.exports = { getTemplates, adoptPlan, getActivePlan, generatePlan };
