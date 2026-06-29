@@ -36,7 +36,7 @@ class PaywallScreen extends ConsumerWidget {
           loading: () => const Center(
             child: CircularProgressIndicator(key: Key('paywall-loading')),
           ),
-          error: (_, _) => _PaywallError(
+          error: (_e, _) => _PaywallError(
             onRetry: () =>
                 ref.read(premiumControllerProvider.notifier).refresh(),
           ),

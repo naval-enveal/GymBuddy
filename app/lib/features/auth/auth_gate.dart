@@ -45,7 +45,7 @@ class _OnboardingRouter extends ConsumerWidget {
           data: (onboardingComplete) =>
               onboardingComplete ? const AppShell() : const OnboardingScreen(),
           loading: () => const _AuthSplash(),
-          error: (_, _) => _OnboardingGateError(
+          error: (_e, _) => _OnboardingGateError(
             onRetry: () => ref.invalidate(onboardingGateProvider),
           ),
         );

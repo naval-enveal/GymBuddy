@@ -135,8 +135,8 @@ class _MetaChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final labels = <String>[
-      ?plan.goalLabel,
-      ?plan.experienceLabel,
+      if (plan.goalLabel != null) plan.goalLabel!,
+      if (plan.experienceLabel != null) plan.experienceLabel!,
       if (plan.daysPerWeek case final days?)
         '$days ${days == 1 ? 'day' : 'days'}/week',
       ...plan.equipmentLabels,

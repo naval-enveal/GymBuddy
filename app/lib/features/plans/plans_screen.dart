@@ -78,7 +78,7 @@ class _PlanCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final meta = <String>[
-      ?plan.experienceLabel,
+      if (plan.experienceLabel != null) plan.experienceLabel!,
       if (plan.daysPerWeek case final days?)
         '$days ${days == 1 ? 'day' : 'days'}/week',
       '${plan.workouts.length} '
