@@ -26,6 +26,9 @@ Flutter/flutter_assets/
 Flutter/flutter_export_environment.sh
 ServiceDefinitions.json
 Runner/GeneratedPluginRegistrant.*
+Podfile
+**/*.xcworkspace/xcshareddata/swiftpm/
+**/*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 
 # Exceptions to above rules.
 !default.mode1v3
