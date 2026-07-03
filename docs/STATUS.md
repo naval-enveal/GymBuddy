@@ -1044,7 +1044,7 @@ Android-emulator alias for the host's dev server on port 4000; override
 - [x] Request validation + shared error response shape
 - [x] Passing integration tests for the auth flow
 
-### M2 — Flutter foundation + design system + shell  `[ ]`
+### M2 — Flutter foundation + design system + shell  `[x]`
 - [x] Design system in `core/design/` (theme, tokens, reusable widgets)
 - [x] App shell + bottom nav (Home, Plans, Workout, Profile) behind an auth gate
 - [x] API client with secure token storage + refresh interceptor
