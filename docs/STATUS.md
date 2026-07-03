@@ -1108,6 +1108,20 @@ Android-emulator alias for the host's dev server on port 4000; override
 
 ---
 
+### R1 — Vitals recovery redesign  [HUMAN GATE]  `[ ]`
+- [ ] Recovery score model server-side (0-100 + band + verdict, baseline-scored, cold-start)
+- [ ] Baseline + deltas server-side, single GET /vitals/today response
+- [ ] Recovery hero on Home (big ring, verdict line, count-up)
+- [ ] Interpreted metric cards (value + delta pill + sparkline w/ baseline)
+- [ ] Visual depth pass (elevation, gradient, rhythm — existing tokens only)
+- [ ] Motion + haptics (ring spring, count-up, refresh haptic, reduced-motion safe)
+
+### R2 — Workout module fixes  [HUMAN GATE]  `[ ]`
+- [ ] PLACEHOLDER — do not start; breakages pending from human. If R2 is active and this
+      is its only task, print "HUMAN_GATE: R2 (awaiting bug list)" and stop.
+
+---
+
 ## Changelog
 <!-- Newest first. Format: YYYY-MM-DD · Mx · what shipped -->
 - 2026-06-28 · M10 · PR `Milestone M10: beta` (m10-polish → dev) merged by human reviewer. All six tasks shipped; M10 complete. All milestones M0–M10 done — BUILD_COMPLETE.

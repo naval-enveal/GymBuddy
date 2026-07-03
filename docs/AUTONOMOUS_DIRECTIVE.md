@@ -29,3 +29,6 @@ This run, do EXACTLY ONE task:
 7. If no unchecked tasks remain anywhere, print "BUILD_COMPLETE".
 Then end your turn. Do not start a second task. Do not weaken tests to make them pass.
 Do not edit secrets or force-push. Never commit to main or dev directly.
+
+For R-milestones (redesign), follow docs/vitals-redesign-directive.md as the scope spec
+instead of docs/PLAN.md.
