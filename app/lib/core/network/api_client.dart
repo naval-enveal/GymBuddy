@@ -199,10 +199,12 @@ class ApiClient {
   }
 }
 
-/// Backend origin. Defaults to the Android-emulator loopback alias for the dev
-/// server (`10.0.2.2:4000` maps to the host's `localhost:4000`); overridden per
-/// environment (and in tests).
-final apiBaseUrlProvider = Provider<String>((ref) => 'http://10.0.2.2:4000');
+/// Backend origin.
+/// - Android emulator: use `http://10.0.2.2:4000` (maps to host localhost)
+/// - Physical device: use `http://<mac-lan-ip>:4000` (e.g. 192.168.100.51)
+/// Both device and Mac must be on the same WiFi network.
+final apiBaseUrlProvider =
+    Provider<String>((ref) => 'http://192.168.100.51:4000');
 
 /// Hook fired when a refresh fails and the session is dead. Defaults to a
 /// no-op so `core/` carries no dependency on the auth feature; the auth layer

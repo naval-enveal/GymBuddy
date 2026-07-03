@@ -41,7 +41,7 @@ class _VitalsDashboard extends ConsumerWidget {
         key: Key('vitals-loading'),
         child: CircularProgressIndicator(),
       ),
-      error: (_, _) => _DashboardError(
+      error: (_e, _) => _DashboardError(
         onRetry: () => ref.invalidate(vitalsControllerProvider),
       ),
       data: (snapshot) => _DashboardBody(

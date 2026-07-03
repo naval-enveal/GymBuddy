@@ -76,7 +76,7 @@ class _StartView extends ConsumerWidget {
         key: Key('workout-loading'),
         child: CircularProgressIndicator(),
       ),
-      error: (_, _) => _StartError(
+      error: (_e, _) => _StartError(
         onRetry: () => ref.invalidate(activePlanControllerProvider),
       ),
       data: (plan) {
@@ -459,7 +459,7 @@ class _CompletedView extends StatelessWidget {
           Expanded(
             child: ListView.separated(
               itemCount: sets.length,
-              separatorBuilder: (_, _) =>
+              separatorBuilder: (_i, _) =>
                   const SizedBox(height: AppSpacing.xs),
               itemBuilder: (context, i) => _CompletedSetTile(set: sets[i]),
             ),
