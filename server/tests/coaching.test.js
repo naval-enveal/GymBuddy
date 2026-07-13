@@ -203,7 +203,7 @@ describe('POST /coaching/cues', () => {
     expect(userMessage).toContain('beginner');
     expect(userMessage).toContain('left knee');
     // Uses the configured model and structured output.
-    expect(capture.params.model).toBe('gemini-2.5-flash');
+    expect(capture.params.model).toBe('gemini-flash-latest');
     expect(capture.params.output_config.format.type).toBe('json_schema');
   });
 

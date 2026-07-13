@@ -299,7 +299,7 @@ describe('POST /plans/generate', () => {
     expect(userMessage).toContain('52');
     expect(userMessage).toContain('81');
     // Uses the configured model and structured output.
-    expect(capture.params.model).toBe('gemini-2.5-flash');
+    expect(capture.params.model).toBe('gemini-flash-latest');
     expect(capture.params.output_config.format.type).toBe('json_schema');
   });
 

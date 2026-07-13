@@ -89,6 +89,12 @@ function buildClient(apiKey) {
             maxOutputTokens,
             responseMimeType: 'application/json',
             responseSchema: toGeminiSchema(outputConfig.format.schema),
+            // Newer Gemini models spend part of maxOutputTokens on an internal
+            // "thinking" pass before the visible answer — for these short,
+            // low-latency structured responses (a plan or a few coaching cues)
+            // that reasoning budget isn't needed and only risks truncating the
+            // real output, so it's disabled.
+            thinkingConfig: { thinkingBudget: 0 },
           },
         });
         return { content: [{ type: 'text', text: response.text }] };
