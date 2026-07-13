@@ -2,7 +2,7 @@
 
 const { Plan, Workout, Profile, WorkoutLog, constants } = require('../models');
 const { ApiError } = require('../middleware/error.middleware');
-const { getClient } = require('./claude.client');
+const { getClient } = require('./ai.client');
 const config = require('../config/env');
 
 const { GOALS, EXPERIENCE_LEVELS, EQUIPMENT } = constants;
@@ -16,11 +16,11 @@ const MAX_TOKENS = 8000;
  * AI plan generation (M9). Gathers the caller's onboarding Profile, recent
  * WorkoutLog history, and a client-supplied vitals snapshot (vitals live
  * on-device in HealthKit/Health Connect — the server never stores them, so
- * they arrive in the request), asks Claude for a structured plan, sanitizes the
+ * they arrive in the request), asks Gemini for a structured plan, sanitizes the
  * model output against our schema, and persists it as the caller's active Plan.
  *
- * The Claude call goes through `claude.client` (the single key-holding seam),
- * so this whole service is unit-testable by injecting a fake client.
+ * The AI call goes through `ai.client` (the single key-holding seam), so this
+ * whole service is unit-testable by injecting a fake client.
  *
  * NOTE: premium gating for this endpoint is a separate M9 task (enforced
  * server-side from the Subscription record) — not wired here yet.
@@ -310,7 +310,7 @@ async function generatePlan(userId, { vitals } = {}) {
   const client = getClient();
 
   const response = await client.messages.create({
-    model: config.anthropic.model,
+    model: config.gemini.model,
     max_tokens: MAX_TOKENS,
     system: SYSTEM_PROMPT,
     output_config: { format: { type: 'json_schema', schema: PLAN_SCHEMA } },

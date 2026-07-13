@@ -39,7 +39,7 @@ conventions in `../CLAUDE.md` apply here too.
 
 ## Security rules (non-negotiable)
 - **Secrets via env only.** Never read secrets outside `config/env.js`. Never
-  commit `.env` (use `.env.example`). The Claude API key is server-side only.
+  commit `.env` (use `.env.example`). The Gemini API key is server-side only.
 - **Premium gating is enforced here, never trusted from the client.** Verify
   subscription state server-side on every premium-gated endpoint.
 

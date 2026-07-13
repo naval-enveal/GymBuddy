@@ -17,13 +17,14 @@ const config = {
     refreshTtl: process.env.JWT_REFRESH_TTL || '30d',
   },
   bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS, 10) || 12,
-  // Claude API (M9). The key is SERVER-SIDE ONLY — the app never holds it, and
-  // it's read from env, never committed. AI features degrade gracefully (503)
-  // when unset rather than failing to boot, so the rest of the API runs without
-  // it in dev/test.
-  anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY || '',
-    model: process.env.ANTHROPIC_MODEL || 'claude-opus-4-8',
+  // Gemini API (M9; swapped from Anthropic for the POC — Gemini's free tier
+  // removes per-call cost). The key is SERVER-SIDE ONLY — the app never holds
+  // it, and it's read from env, never committed. AI features degrade
+  // gracefully (503) when unset rather than failing to boot, so the rest of
+  // the API runs without it in dev/test.
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || '',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   },
 };
 

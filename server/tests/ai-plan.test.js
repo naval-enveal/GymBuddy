@@ -5,13 +5,13 @@
 process.env.BCRYPT_ROUNDS = '4';
 // AI is exercised via an injected fake client; ensure no real key leaks in from
 // the dev environment (the 503-when-unconfigured test depends on this).
-delete process.env.ANTHROPIC_API_KEY;
+delete process.env.GEMINI_API_KEY;
 
 const request = require('supertest');
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const createApp = require('../src/app');
-const claudeClient = require('../src/services/claude.client');
+const aiClient = require('../src/services/ai.client');
 const {
   User,
   Profile,
@@ -22,12 +22,12 @@ const {
   Subscription,
 } = require('../src/models');
 
-// Integration tests for POST /plans/generate (M9) — server-side Claude plan
-// generation. The Anthropic client is injected via claude.client.setClient so
-// no network/API key is needed; a real user is registered through the auth
+// Integration tests for POST /plans/generate (M9) — server-side Gemini plan
+// generation. The AI client is injected via ai.client.setClient so no
+// network/API key is needed; a real user is registered through the auth
 // endpoints so the access token authenticates through the real middleware.
 
-/** A fake Anthropic client returning `planJson` as a JSON text block. */
+/** A fake AI client returning `planJson` as a JSON text block. */
 function fakeClient(planJson, capture) {
   return {
     messages: {
@@ -92,7 +92,7 @@ describe('POST /plans/generate', () => {
   });
 
   afterEach(async () => {
-    claudeClient.setClient(null); // reset the injected client between tests
+    aiClient.setClient(null); // reset the injected client between tests
     await Promise.all([
       User.deleteMany({}),
       Profile.deleteMany({}),
@@ -143,7 +143,7 @@ describe('POST /plans/generate', () => {
     expect(res.status).toBe(401);
   });
 
-  test('rejects a free user server-side (402), before any Claude call', async () => {
+  test('rejects a free user server-side (402), before any AI call', async () => {
     // Register but do NOT grant premium — the default subscription is free.
     const reg = await request(app)
       .post('/auth/register')
@@ -154,7 +154,7 @@ describe('POST /plans/generate', () => {
     // A client claiming premium must not matter: the gate reads the server-side
     // subscription, and the AI service is never reached.
     let called = false;
-    claudeClient.setClient({
+    aiClient.setClient({
       messages: { create: async () => { called = true; return { content: [] }; } },
     });
 
@@ -178,7 +178,7 @@ describe('POST /plans/generate', () => {
       { user: user.id },
       { tier: 'premium', status: 'expired' }
     );
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -191,7 +191,7 @@ describe('POST /plans/generate', () => {
   test('allows an active premium user through the gate', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -203,7 +203,7 @@ describe('POST /plans/generate', () => {
 
   test('requires a profile (onboarding first)', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -217,7 +217,7 @@ describe('POST /plans/generate', () => {
   test('generates and persists an active plan owned by the caller', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -257,7 +257,7 @@ describe('POST /plans/generate', () => {
       isTemplate: false,
       isActive: true,
     });
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -281,7 +281,7 @@ describe('POST /plans/generate', () => {
       exercises: [{ name: 'Romanian Deadlift', sets: [{ reps: 10, weightKg: 70 }] }],
     });
     const capture = {};
-    claudeClient.setClient(fakeClient(goodPlan(), capture));
+    aiClient.setClient(fakeClient(goodPlan(), capture));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -299,14 +299,14 @@ describe('POST /plans/generate', () => {
     expect(userMessage).toContain('52');
     expect(userMessage).toContain('81');
     // Uses the configured model and structured output.
-    expect(capture.params.model).toBe('claude-opus-4-8');
+    expect(capture.params.model).toBe('gemini-2.5-flash');
     expect(capture.params.output_config.format.type).toBe('json_schema');
   });
 
   test('sanitizes malformed model output (clamps, drops junk, fallbacks)', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(
+    aiClient.setClient(
       fakeClient({
         name: '   ',
         goal: 'not_a_real_goal', // out of vocabulary → profile fallback
@@ -349,7 +349,7 @@ describe('POST /plans/generate', () => {
   test('rejects (502) when the model returns no usable workouts', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(
+    aiClient.setClient(
       fakeClient({ name: 'Bad', goal: 'build_muscle', workouts: [] })
     );
 
@@ -364,7 +364,7 @@ describe('POST /plans/generate', () => {
   test('rejects (502) when the model returns invalid JSON', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient({
+    aiClient.setClient({
       messages: { create: async () => ({ content: [{ type: 'text', text: 'not json' }] }) },
     });
 
@@ -379,7 +379,7 @@ describe('POST /plans/generate', () => {
   test('returns 503 when AI is not configured', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(null); // no injected client, no API key in test env
+    aiClient.setClient(null); // no injected client, no API key in test env
 
     const res = await request(app)
       .post('/plans/generate')
@@ -392,7 +392,7 @@ describe('POST /plans/generate', () => {
   test('rejects non-object vitals (400)', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')
@@ -406,7 +406,7 @@ describe('POST /plans/generate', () => {
   test('rejects an out-of-range vital (400)', async () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
-    claudeClient.setClient(fakeClient(goodPlan()));
+    aiClient.setClient(fakeClient(goodPlan()));
 
     const res = await request(app)
       .post('/plans/generate')

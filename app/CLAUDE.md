@@ -43,5 +43,5 @@ Feature code NEVER touches the Meta DAT SDK directly — always go through
 hardware is present.
 
 ## Secrets
-The app never holds the Claude API key or any server secret. AI calls go through
+The app never holds the Gemini API key or any server secret. AI calls go through
 the backend. Premium state is informational only — gating is enforced server-side.

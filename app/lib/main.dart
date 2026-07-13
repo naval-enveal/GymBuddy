@@ -17,7 +17,7 @@ import 'package:gymbuddy/sensors/sensor_source_resolver.dart';
 
 /// The RevenueCat **public** SDK key, injected at build time via
 /// `--dart-define=REVENUECAT_API_KEY=...`. This is not a secret (unlike the
-/// Claude API key, which never leaves the server). When unset — as in dev/test
+/// Gemini API key, which never leaves the server). When unset — as in dev/test
 /// — the premium service stays the [MockPremiumService] default, so the app and
 /// paywall run end to end with no store configured.
 const String _revenueCatApiKey =

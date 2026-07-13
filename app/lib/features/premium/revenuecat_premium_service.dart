@@ -13,7 +13,7 @@ const String kPremiumEntitlementId = 'premium';
 /// The real [PremiumService], backed by RevenueCat via `purchases_flutter`.
 ///
 /// Configured at the composition root from the **public** RevenueCat SDK key —
-/// which is not a secret (unlike the Claude API key, which never leaves the
+/// which is not a secret (unlike the Gemini API key, which never leaves the
 /// server). Entitlement here is purely informational; the server independently
 /// reconciles RevenueCat receipts and enforces premium gating (M9 task 4).
 ///

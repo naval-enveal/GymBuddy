@@ -19,7 +19,7 @@ docs/PLAN.md; live task list in docs/STATUS.md.
 ## Conventions
 - State management: Riverpod. No business logic in widgets.
 - API: REST + JSON, JWT in the Authorization header, shared error response shape.
-- Secrets via env only. The Claude API key is server-side only — the app never holds it.
+- Secrets via env only. The Gemini API key is server-side only — the app never holds it.
 - Premium gating is enforced server-side, never trusted from the client.
 - Commits: conventional commits (feat:, fix:, chore:).
 

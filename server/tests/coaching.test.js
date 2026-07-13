@@ -5,21 +5,21 @@
 process.env.BCRYPT_ROUNDS = '4';
 // AI is exercised via an injected fake client; ensure no real key leaks in from
 // the dev environment (the 503-when-unconfigured test depends on this).
-delete process.env.ANTHROPIC_API_KEY;
+delete process.env.GEMINI_API_KEY;
 
 const request = require('supertest');
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const createApp = require('../src/app');
-const claudeClient = require('../src/services/claude.client');
+const aiClient = require('../src/services/ai.client');
 const { User, Profile, RefreshToken, Subscription } = require('../src/models');
 
-// Integration tests for POST /coaching/cues (M9) — server-side Claude form
-// coaching. The Anthropic client is injected via claude.client.setClient so no
+// Integration tests for POST /coaching/cues (M9) — server-side Gemini form
+// coaching. The AI client is injected via ai.client.setClient so no
 // network/API key is needed; a real user is registered through the auth
 // endpoints so the access token authenticates through the real middleware.
 
-/** A fake Anthropic client returning `cuesJson` as a JSON text block. */
+/** A fake AI client returning `cuesJson` as a JSON text block. */
 function fakeClient(cuesJson, capture) {
   return {
     messages: {
@@ -48,7 +48,7 @@ describe('POST /coaching/cues', () => {
   });
 
   afterEach(async () => {
-    claudeClient.setClient(null); // reset the injected client between tests
+    aiClient.setClient(null); // reset the injected client between tests
     await Promise.all([
       User.deleteMany({}),
       Profile.deleteMany({}),
@@ -97,13 +97,13 @@ describe('POST /coaching/cues', () => {
     expect(res.status).toBe(401);
   });
 
-  test('rejects a free user server-side (402), before any Claude call', async () => {
+  test('rejects a free user server-side (402), before any AI call', async () => {
     // Register but do NOT grant premium — the default subscription is free.
     const reg = await request(app).post('/auth/register').send({ ...creds });
     expect(reg.status).toBe(201);
     const { accessToken } = reg.body;
     let called = false;
-    claudeClient.setClient({
+    aiClient.setClient({
       messages: { create: async () => { called = true; return { content: [] }; } },
     });
 
@@ -125,7 +125,7 @@ describe('POST /coaching/cues', () => {
       { user: user.id },
       { tier: 'premium', status: 'cancelled' }
     );
-    claudeClient.setClient(fakeClient({ cues: ['Chest up.'] }));
+    aiClient.setClient(fakeClient({ cues: ['Chest up.'] }));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -137,7 +137,7 @@ describe('POST /coaching/cues', () => {
 
   test('allows an active premium user through the gate', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient({ cues: ['Chest up.'] }));
+    aiClient.setClient(fakeClient({ cues: ['Chest up.'] }));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -149,7 +149,7 @@ describe('POST /coaching/cues', () => {
 
   test('returns prioritized spoken cues for a faulty set', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(
+    aiClient.setClient(
       fakeClient({
         cues: ['Push your knees out as you stand.', 'Keep your chest up.'],
       })
@@ -179,7 +179,7 @@ describe('POST /coaching/cues', () => {
     const { accessToken, userId } = await registerAndToken();
     await seedProfile(userId);
     const capture = {};
-    claudeClient.setClient(fakeClient({ cues: ['Brace your core.'] }, capture));
+    aiClient.setClient(fakeClient({ cues: ['Brace your core.'] }, capture));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -203,14 +203,14 @@ describe('POST /coaching/cues', () => {
     expect(userMessage).toContain('beginner');
     expect(userMessage).toContain('left knee');
     // Uses the configured model and structured output.
-    expect(capture.params.model).toBe('claude-opus-4-8');
+    expect(capture.params.model).toBe('gemini-2.5-flash');
     expect(capture.params.output_config.format.type).toBe('json_schema');
   });
 
   test('works without a profile (coaching is not gated on onboarding)', async () => {
     const { accessToken } = await registerAndToken();
     const capture = {};
-    claudeClient.setClient(fakeClient({ cues: ['Slow the descent.'] }, capture));
+    aiClient.setClient(fakeClient({ cues: ['Slow the descent.'] }, capture));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -225,7 +225,7 @@ describe('POST /coaching/cues', () => {
 
   test('returns an empty list for a clean set', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient({ cues: [] }));
+    aiClient.setClient(fakeClient({ cues: [] }));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -238,7 +238,7 @@ describe('POST /coaching/cues', () => {
 
   test('sanitizes malformed cue output (trims, drops blanks, caps to 3)', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(
+    aiClient.setClient(
       fakeClient({
         cues: [
           '  Push your knees out.  ', // trimmed
@@ -266,7 +266,7 @@ describe('POST /coaching/cues', () => {
 
   test('returns an empty list when the model output has no cues array', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient({ notCues: 'whoops' }));
+    aiClient.setClient(fakeClient({ notCues: 'whoops' }));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -279,7 +279,7 @@ describe('POST /coaching/cues', () => {
 
   test('rejects (502) when the model returns invalid JSON', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient({
+    aiClient.setClient({
       messages: {
         create: async () => ({ content: [{ type: 'text', text: 'not json' }] }),
       },
@@ -295,7 +295,7 @@ describe('POST /coaching/cues', () => {
 
   test('returns 503 when AI is not configured', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(null); // no injected client, no API key in test env
+    aiClient.setClient(null); // no injected client, no API key in test env
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -307,7 +307,7 @@ describe('POST /coaching/cues', () => {
 
   test('requires an exercise (400)', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient({ cues: [] }));
+    aiClient.setClient(fakeClient({ cues: [] }));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -320,7 +320,7 @@ describe('POST /coaching/cues', () => {
 
   test('rejects an invalid form-cue severity (400)', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient({ cues: [] }));
+    aiClient.setClient(fakeClient({ cues: [] }));
 
     const res = await request(app)
       .post('/coaching/cues')
@@ -336,7 +336,7 @@ describe('POST /coaching/cues', () => {
 
   test('rejects an out-of-range rep count (400)', async () => {
     const { accessToken } = await registerAndToken();
-    claudeClient.setClient(fakeClient({ cues: [] }));
+    aiClient.setClient(fakeClient({ cues: [] }));
 
     const res = await request(app)
       .post('/coaching/cues')

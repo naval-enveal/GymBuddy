@@ -2,19 +2,19 @@
 
 const { Profile } = require('../models');
 const { ApiError } = require('../middleware/error.middleware');
-const { getClient } = require('./claude.client');
+const { getClient } = require('./ai.client');
 const config = require('../config/env');
 
 /**
  * Real-time form coaching (M9). Takes a snapshot of what the on-device pose
  * pipeline saw during a set — the exercise, the form faults the
- * `PoseFormChecker` fired, and how the set is going — and asks Claude for a
+ * `PoseFormChecker` fired, and how the set is going — and asks Gemini for a
  * SHORT, prioritized list of spoken cues. The app then plays them through the
  * glasses via `MetaGlassesSensorSource.playCue`.
  *
- * The Claude call goes through `claude.client` (the single key-holding seam),
- * so this whole service is unit-testable by injecting a fake client — the
- * Claude API key never leaves the server (CLAUDE.md).
+ * The AI call goes through `ai.client` (the single key-holding seam), so this
+ * whole service is unit-testable by injecting a fake client — the AI provider
+ * key never leaves the server (CLAUDE.md).
  *
  * Vitals/pose live on-device, so the sampled faults arrive in the request body;
  * the caller's Profile (experience + injuries) is read server-side to
@@ -139,7 +139,7 @@ async function generateCues(userId, input) {
   const client = getClient();
 
   const response = await client.messages.create({
-    model: config.anthropic.model,
+    model: config.gemini.model,
     max_tokens: MAX_TOKENS,
     system: SYSTEM_PROMPT,
     output_config: { format: { type: 'json_schema', schema: CUES_SCHEMA } },
